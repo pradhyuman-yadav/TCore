@@ -1,0 +1,68 @@
+# Production compose — used by Portainer.
+# Images are built by GitHub Actions and pushed to GHCR.
+# Set GHCR_OWNER to your GitHub username in Portainer stack environment variables.
+# All DB_* and CLAUDE_* vars must also be set there (no .env file on server needed).
+
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg15
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - timescale_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
+  backend:
+    image: ghcr.io/${GHCR_OWNER}/tradecore-backend:latest
+    restart: unless-stopped
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    environment:
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_HOST: timescaledb
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME}
+      CCXT_EXCHANGE: ${CCXT_EXCHANGE:-binance}
+      CCXT_API_KEY: ${CCXT_API_KEY:-}
+      CCXT_SECRET: ${CCXT_SECRET:-}
+      TRADING_MODE: ${TRADING_MODE:-paper}
+      APP_VERSION: ${APP_VERSION:-0.1.0}
+      CLAUDE_ACCESS_TOKEN: ${CLAUDE_ACCESS_TOKEN}
+      CLAUDE_REFRESH_TOKEN: ${CLAUDE_REFRESH_TOKEN}
+      CLAUDE_TOKEN_EXPIRES_AT: ${CLAUDE_TOKEN_EXPIRES_AT:-0}
+      NTFY_URL: ${NTFY_URL:-}
+      NTFY_TOKEN: ${NTFY_TOKEN:-}
+    volumes:
+      - strategies:/app/strategies
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    command: >
+      uv run uvicorn app.main:app
+      --host 0.0.0.0
+      --port 8000
+      --workers 2
+
+  frontend:
+    image: ghcr.io/${GHCR_OWNER}/tradecore-frontend:latest
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-80}:80"
+
+volumes:
+  timescale_data:
+  strategies:

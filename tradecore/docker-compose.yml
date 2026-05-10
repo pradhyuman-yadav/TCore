@@ -1,0 +1,35 @@
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg15
+    environment:
+      POSTGRES_DB: tradecore
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    ports: ["5432:5432"]
+    volumes:
+      - timescale_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d tradecore"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    env_file: .env
+    ports: ["8000:8000"]
+    volumes:
+      - ./strategies:/app/strategies
+      - ./backend:/app
+
+  frontend:
+    build: ./frontend
+    ports: ["5173:5173"]
+    volumes:
+      - ./frontend/src:/app/src
+
+volumes:
+  timescale_data:

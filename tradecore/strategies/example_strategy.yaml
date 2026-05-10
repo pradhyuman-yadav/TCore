@@ -1,0 +1,36 @@
+name: btc_momentum_v1
+symbol: BTC/USDT
+exchange: binance
+timeframe: 1h
+refresh_cadence_seconds: 300
+
+indicators:
+  rsi:
+    weight: 0.20
+  macd_hist:
+    weight: 0.15
+  bb_position:
+    weight: 0.10
+  ema_cross:
+    weight: 0.10
+    params:
+      fast: 12
+      slow: 26
+  news_sentiment:
+    weight: 0.25
+    cache_ttl_minutes: 15
+  social_sentiment:
+    weight: 0.20
+    cache_ttl_minutes: 5
+
+rules:
+  buy_threshold: 0.45
+  sell_threshold: -0.35
+
+position_sizing:
+  mode: fixed_usdt
+  amount: 100
+  max_open_positions: 1
+
+risk:
+  max_daily_loss_usdt: 200
