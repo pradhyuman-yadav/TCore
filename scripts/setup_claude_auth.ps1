@@ -1,6 +1,6 @@
 # setup_claude_auth.ps1
 # Extracts Claude OAuth tokens from the local Claude Code credentials file
-# and writes them into tradecore/.env so Docker can use them.
+# and writes them into .env so Docker can use them.
 #
 # Usage (local → server):
 #   1. Run this script locally to update .env
@@ -8,7 +8,7 @@
 #   3. docker compose up -d
 
 param(
-    [string]$EnvFile = "$PSScriptRoot\..\tradecore\.env"
+    [string]$EnvFile = "$PSScriptRoot\..\.env"
 )
 
 $CredsFile = "$env:USERPROFILE\.claude\.credentials.json"

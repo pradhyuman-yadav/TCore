@@ -56,16 +56,16 @@ jobs:
       - name: Cache uv venv
         uses: actions/cache@v4
         with:
-          path: tradecore/backend/.venv
-          key: uv-${{ runner.os }}-${{ hashFiles('tradecore/backend/uv.lock') }}
+          path: backend/.venv
+          key: uv-${{ runner.os }}-${{ hashFiles('backend/uv.lock') }}
           restore-keys: uv-${{ runner.os }}-
 
       - name: Install dependencies (with dev extras)
-        working-directory: tradecore/backend
+        working-directory: backend
         run: uv sync --extra dev
 
       - name: Run full test suite
-        working-directory: tradecore/backend
+        working-directory: backend
         run: uv run pytest -v --tb=short
 
   # ── Build & push Docker images → trigger Portainer ───────────────────────────
@@ -95,8 +95,8 @@ jobs:
       - name: Build and push backend image
         uses: docker/build-push-action@v5
         with:
-          context: tradecore/backend
-          file: tradecore/backend/Dockerfile
+          context: backend
+          file: backend/Dockerfile
           push: true
           tags: |
             ${{ env.BACKEND_IMAGE }}:latest
@@ -107,8 +107,8 @@ jobs:
       - name: Build and push frontend image
         uses: docker/build-push-action@v5
         with:
-          context: tradecore/frontend
-          file: tradecore/frontend/Dockerfile.prod
+          context: frontend
+          file: frontend/Dockerfile.prod
           push: true
           tags: |
             ${{ env.FRONTEND_IMAGE }}:latest
