@@ -1,3 +1,4 @@
+import asyncio
 import os
 import sys
 import subprocess
@@ -11,6 +12,14 @@ load_dotenv(_env_file)
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy import text
+
+
+@pytest.fixture(scope="session")
+def event_loop():
+    """Single event loop shared across all tests — prevents asyncpg cross-loop errors."""
+    loop = asyncio.new_event_loop()
+    yield loop
+    loop.close()
 
 
 @pytest.fixture(scope="session", autouse=True)
