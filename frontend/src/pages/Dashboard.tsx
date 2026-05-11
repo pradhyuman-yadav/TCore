@@ -4,6 +4,90 @@ import { useStore } from '../store'
 import { TC } from '../theme'
 import { TCCard, TCBadge, TCSectionHeader, TCTable, TCEmpty, ColDef } from '../components/ui'
 
+// ── Data Seed Panel ─────────────────────────────────────────────────────────
+const SEED_SYMBOLS = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT']
+const SEED_TF      = '1h'
+const SEED_DAYS    = 90
+
+function DataSeedPanel() {
+  const [rows, setRows]         = useState<Record<string, { count: number; syncing: boolean; result: string }>>({})
+
+  useEffect(() => {
+    // check counts for each symbol
+    SEED_SYMBOLS.forEach(sym => {
+      api.getOhlcvCount(sym, 'binance').then(r => {
+        setRows(prev => ({ ...prev, [sym]: { count: r.count, syncing: false, result: '' } }))
+      }).catch(() => {
+        setRows(prev => ({ ...prev, [sym]: { count: 0, syncing: false, result: '' } }))
+      })
+    })
+  }, [])
+
+  const sync = async (sym: string) => {
+    setRows(prev => ({ ...prev, [sym]: { ...prev[sym], syncing: true, result: '' } }))
+    try {
+      const r = await api.syncMarket(sym, 'binance', SEED_TF, SEED_DAYS)
+      setRows(prev => ({ ...prev, [sym]: { count: r.upserted, syncing: false, result: `✓ ${r.upserted} bars` } }))
+    } catch (e: unknown) {
+      setRows(prev => ({ ...prev, [sym]: { ...prev[sym], syncing: false, result: `✗ ${e instanceof Error ? e.message : 'failed'}` } }))
+    }
+  }
+
+  const syncAll = () => SEED_SYMBOLS.forEach(sync)
+  const anyMissing = SEED_SYMBOLS.some(s => (rows[s]?.count ?? 0) === 0)
+
+  return (
+    <TCCard>
+      <TCSectionHeader title="Market Data" right={
+        <button onClick={syncAll} style={{
+          padding: '3px 12px', borderRadius: 4, cursor: 'pointer',
+          border: `1px solid ${TC.accent}`, background: TC.accentDim,
+          color: TC.accent, fontFamily: TC.fontMono, fontSize: 10, fontWeight: 700,
+        }}>
+          Sync All ({SEED_DAYS}d)
+        </button>
+      }/>
+      {anyMissing && (
+        <div style={{ padding: '8px 16px', background: 'rgba(255,204,0,0.05)', borderBottom: `1px solid rgba(255,204,0,0.2)` }}>
+          <span style={{ color: TC.yellow, fontFamily: TC.fontMono, fontSize: 10 }}>
+            ⚠ Some symbols have no OHLCV data. Sync before running strategy.
+          </span>
+        </div>
+      )}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)' }}>
+        {SEED_SYMBOLS.map(sym => {
+          const row = rows[sym]
+          const hasData = (row?.count ?? 0) > 0
+          return (
+            <div key={sym} style={{ padding: '12px 16px', borderRight: `1px solid ${TC.border}` }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <span style={{ fontFamily: TC.fontMono, fontSize: 12, color: TC.text }}>{sym}</span>
+                <TCBadge variant={hasData ? 'buy' : 'sell'}>{hasData ? 'OK' : 'EMPTY'}</TCBadge>
+              </div>
+              <div style={{ color: TC.textMuted, fontFamily: TC.fontMono, fontSize: 10, marginBottom: 8 }}>
+                {row === undefined ? '…' : `${row.count.toLocaleString()} bars · ${SEED_TF}`}
+              </div>
+              <button onClick={() => sync(sym)} disabled={row?.syncing} style={{
+                width: '100%', padding: '5px 0', borderRadius: 4, cursor: row?.syncing ? 'not-allowed' : 'pointer',
+                border: `1px solid ${TC.border}`, background: 'transparent',
+                color: row?.syncing ? TC.textMuted : TC.accent, fontFamily: TC.fontMono, fontSize: 10, fontWeight: 700,
+                transition: 'all 0.15s',
+              }}>
+                {row?.syncing ? '⟳ Syncing…' : `⟳ Sync ${SEED_DAYS}d`}
+              </button>
+              {row?.result && (
+                <div style={{ marginTop: 4, color: row.result.startsWith('✓') ? TC.green : TC.red, fontSize: 9, fontFamily: TC.fontMono }}>
+                  {row.result}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </TCCard>
+  )
+}
+
 // ── Score Gauge ─────────────────────────────────────────────────────────────
 function ScoreGauge({ score }: { score: number }) {
   const CX = 100, CY = 90, OR = 68, IR = 52
@@ -168,6 +252,9 @@ export default function Dashboard() {
           <TCTable columns={tradeColumns} rows={trades} emptyMsg="No recent trades"/>
         </TCCard>
       </div>
+
+      {/* Data seed panel */}
+      <DataSeedPanel/>
 
       {/* PnL + Score */}
       <div style={{ display: 'flex', gap: 12 }}>

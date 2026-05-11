@@ -23,8 +23,13 @@ export const api = {
   // Market
   getOhlcv: (symbol: string, exchange: string, timeframe = '1h', limit = 200) =>
     req<OhlcvBar[]>(`/market/ohlcv?symbol=${encodeURIComponent(symbol)}&exchange=${exchange}&timeframe=${timeframe}&limit=${limit}`),
-  syncMarket: (symbol: string, exchange: string) =>
-    req(`/market/sync?symbol=${encodeURIComponent(symbol)}&exchange=${exchange}`, { method: 'POST' }),
+  getOhlcvCount: (symbol: string, exchange: string) =>
+    req<{ symbol: string; exchange: string; count: number }>(`/market/ohlcv/count?symbol=${encodeURIComponent(symbol)}&exchange=${exchange}`),
+  syncMarket: (symbol: string, exchange: string, timeframe = '1h', days = 90) =>
+    req<{ symbol: string; exchange: string; timeframe: string; days: number; upserted: number }>(
+      `/market/sync?symbol=${encodeURIComponent(symbol)}&exchange=${exchange}&timeframe=${timeframe}&days=${days}`,
+      { method: 'POST' }
+    ),
 
   // Strategy
   listStrategies: () => req<StrategyRow[]>('/strategy'),
