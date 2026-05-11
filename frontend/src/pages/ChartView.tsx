@@ -1,137 +1,172 @@
 import { useEffect, useRef, useState } from 'react'
-import { createChart, IChartApi } from 'lightweight-charts'
+import { createChart, IChartApi, ISeriesApi, CandlestickData, Time } from 'lightweight-charts'
 import { api, OhlcvBar } from '../api'
+import { TC } from '../theme'
+import { TCCard, TCBadge, TCSectionHeader } from '../components/ui'
+
+const SYMBOLS = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT']
+const TIMEFRAMES = ['1m', '5m', '15m', '1h', '4h', '1d']
+
+const INDICATORS = [
+  { key: 'rsi',       label: 'RSI',          weight: 0.25 },
+  { key: 'macd',      label: 'MACD',         weight: 0.20 },
+  { key: 'bb',        label: 'BB Position',  weight: 0.15 },
+  { key: 'ema',       label: 'EMA Cross',    weight: 0.20 },
+  { key: 'volume',    label: 'Volume Surge', weight: 0.10 },
+  { key: 'sentiment', label: 'Sentiment',    weight: 0.10 },
+]
+
+function IndicatorBar({ label, value, weight }: { label: string; value: number; weight: number }) {
+  const col = value > 0.3 ? TC.green : value < -0.3 ? TC.red : TC.textMid
+  const contrib = (value * weight).toFixed(4)
+  const pctHalf = Math.min(Math.abs(value), 1) * 50
+  return (
+    <div style={{ padding: '9px 16px', borderRight: `1px solid ${TC.border}` }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+        <span style={{ color: TC.textMuted, fontSize: 9.5, fontFamily: TC.fontMono }}>{label}</span>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <span style={{ color: col, fontSize: 10, fontFamily: TC.fontMono, fontWeight: 600 }}>
+            {value >= 0 ? '+' : ''}{value.toFixed(3)}
+          </span>
+          <span style={{ color: TC.textMuted, fontSize: 9, fontFamily: TC.fontMono }}>
+            x{weight.toFixed(2)}={Number(contrib) > 0 ? '+' : ''}{contrib}
+          </span>
+        </div>
+      </div>
+      <div style={{ position: 'relative', height: 3, background: TC.surface2, borderRadius: 2 }}>
+        <div style={{
+          position: 'absolute', height: '100%',
+          width: `${pctHalf}%`,
+          left: value >= 0 ? '50%' : `${50 - pctHalf}%`,
+          background: col, borderRadius: 2,
+          boxShadow: `0 0 5px ${col}55`,
+        }}/>
+        <div style={{ position: 'absolute', left: '50%', top: 0, width: 1, height: '100%', background: TC.borderHi }}/>
+      </div>
+    </div>
+  )
+}
 
 export default function ChartView() {
+  const [symbol, setSymbol]       = useState('BTC/USDT')
+  const [timeframe, setTimeframe] = useState('15m')
+  const [score] = useState(0.67)
   const containerRef = useRef<HTMLDivElement>(null)
-  const chartRef = useRef<IChartApi | null>(null)
-  const [symbol, setSymbol] = useState('BTC/USDT')
-  const [exchange, setExchange] = useState('binance')
-  const [timeframe, setTimeframe] = useState('1h')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+  const chartRef     = useRef<IChartApi | null>(null)
+  const seriesRef    = useRef<ISeriesApi<'Candlestick'> | null>(null)
+
+  const zone = score > 0.3 ? 'BUY' : score < -0.3 ? 'SELL' : 'NEUTRAL'
 
   useEffect(() => {
     if (!containerRef.current) return
+    if (chartRef.current) { chartRef.current.remove(); chartRef.current = null }
+
     const chart = createChart(containerRef.current, {
-      layout: { background: { color: '#1e1e2e' }, textColor: '#9ca3af' },
-      grid: { vertLines: { color: '#383852' }, horzLines: { color: '#383852' } },
-      width: containerRef.current.clientWidth,
-      height: 480,
-      timeScale: { timeVisible: true },
+      layout: { background: { color: TC.bg }, textColor: TC.textMuted, fontFamily: TC.fontMono, fontSize: 11 },
+      grid: {
+        vertLines: { color: 'rgba(255,255,255,0.04)' },
+        horzLines: { color: 'rgba(255,255,255,0.04)' },
+      },
+      crosshair: {
+        vertLine: { color: TC.accent + '66', labelBackgroundColor: TC.surface2 },
+        horzLine: { color: TC.accent + '66', labelBackgroundColor: TC.surface2 },
+      },
+      rightPriceScale: { borderColor: TC.border },
+      timeScale: { borderColor: TC.border, timeVisible: true },
+      width:  containerRef.current.clientWidth,
+      height: containerRef.current.clientHeight,
     })
-    chartRef.current = chart
+
+    const series = chart.addCandlestickSeries({
+      upColor:         TC.green,
+      downColor:       TC.red,
+      borderUpColor:   TC.green,
+      borderDownColor: TC.red,
+      wickUpColor:     TC.green,
+      wickDownColor:   TC.red,
+    })
+    chartRef.current  = chart
+    seriesRef.current = series
+
+    api.getOhlcv(symbol, 'binance', timeframe, 200).then((bars: OhlcvBar[]) => {
+      const data: CandlestickData[] = bars.map(b => ({
+        time:  (new Date(b.time).getTime() / 1000) as Time,
+        open:  b.open, high: b.high, low: b.low, close: b.close,
+      }))
+      series.setData(data)
+      chart.timeScale().fitContent()
+    }).catch(() => {})
 
     const ro = new ResizeObserver(() => {
-      if (containerRef.current) chart.applyOptions({ width: containerRef.current.clientWidth })
+      if (containerRef.current && chartRef.current) {
+        chartRef.current.applyOptions({ width: containerRef.current.clientWidth, height: containerRef.current.clientHeight })
+      }
     })
     ro.observe(containerRef.current)
+    return () => { ro.disconnect(); chart.remove(); chartRef.current = null }
+  }, [symbol, timeframe])
 
-    return () => {
-      ro.disconnect()
-      chart.remove()
-    }
-  }, [])
+  const pillBtn = (active: boolean) => ({
+    padding: '4px 12px', borderRadius: 5, cursor: 'pointer',
+    border: `1px solid ${active ? TC.accent : TC.border}`,
+    background: active ? TC.accentDim : 'transparent',
+    color: active ? TC.accent : TC.textMid,
+    fontFamily: TC.fontMono, fontSize: 11.5, fontWeight: active ? 600 : 400,
+    transition: 'all 0.12s',
+  } as React.CSSProperties)
 
-  async function load() {
-    if (!chartRef.current) return
-    setLoading(true)
-    setError('')
-    try {
-      const bars = await api.getOhlcv(symbol, exchange, timeframe, 300)
-      const data = bars
-        .map((b: OhlcvBar) => ({
-          time: Math.floor(new Date(b.time).getTime() / 1000) as any,
-          open: b.open,
-          high: b.high,
-          low: b.low,
-          close: b.close,
-        }))
-        .sort((a: any, b: any) => a.time - b.time)
-
-      const series = chartRef.current.addCandlestickSeries({
-        upColor: '#4ade80',
-        downColor: '#f87171',
-        borderVisible: false,
-        wickUpColor: '#4ade80',
-        wickDownColor: '#f87171',
-      })
-      series.setData(data)
-      chartRef.current.timeScale().fitContent()
-    } catch (e: any) {
-      setError(e.message)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function sync() {
-    setLoading(true)
-    try {
-      await api.syncMarket(symbol, exchange)
-      await load()
-    } catch (e: any) {
-      setError(e.message)
-    } finally {
-      setLoading(false)
-    }
-  }
+  const tfBtn = (active: boolean) => ({
+    padding: '3px 9px', borderRadius: 4, cursor: 'pointer', border: 'none',
+    background: active ? TC.surface3 : 'transparent',
+    color: active ? TC.text : TC.textMuted,
+    fontFamily: TC.fontMono, fontSize: 11, fontWeight: active ? 600 : 400,
+    transition: 'all 0.12s',
+  } as React.CSSProperties)
 
   return (
-    <div className="space-y-4">
-      <h1 className="text-2xl font-bold text-white">Chart</h1>
-
-      <div className="flex flex-wrap gap-3 items-end">
-        <label className="flex flex-col gap-1 text-xs text-gray-400">
-          Symbol
-          <input
-            value={symbol}
-            onChange={(e) => setSymbol(e.target.value)}
-            className="bg-surface-raised border border-surface-border rounded px-3 py-1.5 text-sm text-white w-36"
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-xs text-gray-400">
-          Exchange
-          <input
-            value={exchange}
-            onChange={(e) => setExchange(e.target.value)}
-            className="bg-surface-raised border border-surface-border rounded px-3 py-1.5 text-sm text-white w-28"
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-xs text-gray-400">
-          Timeframe
-          <select
-            value={timeframe}
-            onChange={(e) => setTimeframe(e.target.value)}
-            className="bg-surface-raised border border-surface-border rounded px-3 py-1.5 text-sm text-white"
-          >
-            {['1m', '5m', '15m', '1h', '4h', '1d'].map((t) => (
-              <option key={t}>{t}</option>
-            ))}
-          </select>
-        </label>
-        <button
-          onClick={load}
-          disabled={loading}
-          className="px-4 py-1.5 bg-brand hover:bg-brand-dark text-white rounded text-sm font-semibold disabled:opacity-50"
-        >
-          Load
-        </button>
-        <button
-          onClick={sync}
-          disabled={loading}
-          className="px-4 py-1.5 bg-surface-border hover:bg-gray-600 text-white rounded text-sm font-semibold disabled:opacity-50"
-        >
-          Sync 30d
-        </button>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+      {/* Controls */}
+      <div style={{
+        padding: '10px 18px', borderBottom: `1px solid ${TC.border}`,
+        display: 'flex', alignItems: 'center', gap: 14, flexShrink: 0,
+        background: TC.surface,
+      }}>
+        <div style={{ display: 'flex', gap: 5 }}>
+          {SYMBOLS.map(s => <button key={s} onClick={() => setSymbol(s)} style={pillBtn(symbol === s)}>{s}</button>)}
+        </div>
+        <div style={{ width: 1, height: 18, background: TC.border }}/>
+        <div style={{ display: 'flex', gap: 3 }}>
+          {TIMEFRAMES.map(tf => <button key={tf} onClick={() => setTimeframe(tf)} style={tfBtn(timeframe === tf)}>{tf}</button>)}
+        </div>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <TCBadge variant={zone === 'BUY' ? 'buy' : zone === 'SELL' ? 'sell' : 'neutral'}>{zone} ZONE</TCBadge>
+          <span style={{
+            color: zone === 'BUY' ? TC.green : zone === 'SELL' ? TC.red : TC.textMid,
+            fontFamily: TC.fontMono, fontSize: 18, fontWeight: 700,
+          }}>
+            {score > 0 ? '+' : ''}{score.toFixed(3)}
+          </span>
+        </div>
       </div>
 
-      {error && <p className="text-red-400 text-sm">{error}</p>}
+      {/* Chart */}
+      <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+        <div ref={containerRef} style={{ width: '100%', height: '100%' }}/>
+      </div>
 
-      <div
-        ref={containerRef}
-        className="w-full rounded-lg border border-surface-border overflow-hidden"
-      />
+      {/* Indicator panel */}
+      <div style={{ flexShrink: 0, borderTop: `1px solid ${TC.border}`, background: TC.surface }}>
+        <TCSectionHeader title="Indicator Snapshot" right={
+          <span style={{ color: TC.textMuted, fontSize: 9, fontFamily: TC.fontMono }}>
+            Last: {new Date().toTimeString().slice(0, 8)}
+          </span>
+        }/>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)' }}>
+          {INDICATORS.map(ind => (
+            <IndicatorBar key={ind.key} label={ind.label} value={0.55} weight={ind.weight}/>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }

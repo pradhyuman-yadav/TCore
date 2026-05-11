@@ -1,146 +1,157 @@
-import { useRef, useState } from 'react'
-import { createChart } from 'lightweight-charts'
-import { api, BacktestResult } from '../api'
-import { useStore } from '../store'
+import { useEffect, useRef, useState } from 'react'
+import { createChart, IChartApi, Time } from 'lightweight-charts'
+import { api, BacktestResult, BacktestTrade } from '../api'
+import { TC } from '../theme'
+import { TCCard, TCBadge, TCSectionHeader, TCTable, ColDef } from '../components/ui'
 
-export default function Backtest() {
-  const { activeStrategy } = useStore()
-  const [symbol, setSymbol] = useState((activeStrategy?.symbol as string) ?? 'BTC/USDT')
-  const [exchange, setExchange] = useState((activeStrategy?.exchange as string) ?? 'binance')
-  const [capital, setCapital] = useState('10000')
-  const [result, setResult] = useState<BacktestResult | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const chartRef = useRef<HTMLDivElement>(null)
-
-  async function run() {
-    setLoading(true)
-    setError('')
-    setResult(null)
-    try {
-      const res = await api.runBacktest({
-        symbol,
-        exchange,
-        initial_capital: parseFloat(capital) || 10000,
-        strategy_config: activeStrategy ?? undefined,
-      })
-      setResult(res)
-      setTimeout(() => renderEquityCurve(res), 50)
-    } catch (e: any) {
-      setError(e.message)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  function renderEquityCurve(res: BacktestResult) {
-    if (!chartRef.current || res.equity_curve.length === 0) return
-    chartRef.current.innerHTML = ''
-    const chart = createChart(chartRef.current, {
-      layout: { background: { color: '#1e1e2e' }, textColor: '#9ca3af' },
-      grid: { vertLines: { color: '#383852' }, horzLines: { color: '#383852' } },
-      width: chartRef.current.clientWidth,
-      height: 260,
-    })
-    const series = chart.addLineSeries({ color: '#6366f1', lineWidth: 2 })
-    const data = res.equity_curve.map((v, i) => ({ time: (i + 1) as any, value: v }))
-    series.setData(data)
-    chart.timeScale().fitContent()
-  }
-
-  const pct = (v: number) => `${(v * 100).toFixed(2)}%`
-
+function StatCard({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-white">Backtest</h1>
-
-      <div className="bg-surface-raised border border-surface-border rounded-lg p-4 flex flex-wrap gap-4 items-end">
-        <label className="flex flex-col gap-1 text-xs text-gray-400">
-          Symbol
-          <input value={symbol} onChange={(e) => setSymbol(e.target.value)}
-            className="bg-surface border border-surface-border rounded px-3 py-1.5 text-sm text-white w-36" />
-        </label>
-        <label className="flex flex-col gap-1 text-xs text-gray-400">
-          Exchange
-          <input value={exchange} onChange={(e) => setExchange(e.target.value)}
-            className="bg-surface border border-surface-border rounded px-3 py-1.5 text-sm text-white w-28" />
-        </label>
-        <label className="flex flex-col gap-1 text-xs text-gray-400">
-          Initial Capital ($)
-          <input value={capital} onChange={(e) => setCapital(e.target.value)} type="number"
-            className="bg-surface border border-surface-border rounded px-3 py-1.5 text-sm text-white w-32" />
-        </label>
-        <button onClick={run} disabled={loading}
-          className="px-5 py-2 bg-brand hover:bg-brand-dark text-white rounded text-sm font-semibold disabled:opacity-50">
-          {loading ? 'Running…' : 'Run Backtest'}
-        </button>
-      </div>
-
-      {!activeStrategy && (
-        <p className="text-yellow-400 text-sm">No active strategy — activate one in Strategy Builder first.</p>
-      )}
-
-      {error && <p className="text-red-400 text-sm">{error}</p>}
-
-      {result && (
-        <div className="space-y-4">
-          {/* Stats */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <Stat label="Total Bars" value={String(result.total_bars)} />
-            <Stat label="Trades" value={String(result.num_trades)} />
-            <Stat label="Total PnL" value={`$${result.total_pnl.toFixed(2)}`} positive={result.total_pnl >= 0} />
-            <Stat label="Win Rate" value={pct(result.win_rate)} positive={result.win_rate >= 0.5} />
-            <Stat label="Max Drawdown" value={pct(result.max_drawdown)} positive={false} />
-            <Stat label="Sharpe" value={result.sharpe_ratio !== null ? result.sharpe_ratio.toFixed(2) : '—'} positive={(result.sharpe_ratio ?? 0) > 1} />
-          </div>
-
-          {/* Equity curve */}
-          <div className="bg-surface-raised border border-surface-border rounded-lg p-4">
-            <h2 className="text-sm font-semibold text-gray-300 mb-3">Equity Curve</h2>
-            <div ref={chartRef} className="w-full" />
-          </div>
-
-          {/* Trade log */}
-          <div className="bg-surface-raised border border-surface-border rounded-lg p-4">
-            <h2 className="text-sm font-semibold text-gray-300 mb-3">Trade Log ({result.trades.length})</h2>
-            <div className="overflow-x-auto max-h-64 overflow-y-auto">
-              <table className="w-full text-xs">
-                <thead className="sticky top-0 bg-surface-raised">
-                  <tr className="text-gray-400 text-left border-b border-surface-border">
-                    <th className="pb-2">Bar</th>
-                    <th className="pb-2">Side</th>
-                    <th className="pb-2">Price</th>
-                    <th className="pb-2">Qty</th>
-                    <th className="pb-2">PnL</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {result.trades.map((t, i) => (
-                    <tr key={i} className="border-b border-surface-border/30">
-                      <td className="py-1">{t.bar_index}</td>
-                      <td className={t.side === 'buy' ? 'text-green-400' : 'text-red-400'}>{t.side}</td>
-                      <td>${t.price.toLocaleString()}</td>
-                      <td>{t.quantity.toFixed(6)}</td>
-                      <td className={t.pnl === null ? 'text-gray-500' : t.pnl >= 0 ? 'text-green-400' : 'text-red-400'}>
-                        {t.pnl === null ? '—' : `$${t.pnl.toFixed(2)}`}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+    <TCCard style={{ flex: 1, padding: '14px 16px', textAlign: 'center' }}>
+      <div style={{ color: TC.textMuted, fontSize: 9, fontFamily: TC.fontMono, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 10 }}>{label}</div>
+      <div style={{ color: color ?? TC.text, fontFamily: TC.fontMono, fontSize: 21, fontWeight: 700 }}>{value}</div>
+    </TCCard>
   )
 }
 
-function Stat({ label, value, positive }: { label: string; value: string; positive?: boolean }) {
+function EquityChart({ curve, capital }: { curve: number[]; capital: number }) {
+  const ref  = useRef<HTMLDivElement>(null)
+  const inst = useRef<IChartApi | null>(null)
+
+  useEffect(() => {
+    if (!ref.current || curve.length === 0) return
+    if (inst.current) { inst.current.remove(); inst.current = null }
+
+    const chart = createChart(ref.current, {
+      layout: { background: { color: TC.bg }, textColor: TC.textMuted, fontFamily: TC.fontMono, fontSize: 11 },
+      grid: { vertLines: { color: 'rgba(255,255,255,0.04)' }, horzLines: { color: 'rgba(255,255,255,0.04)' } },
+      crosshair: {
+        vertLine: { color: TC.accent + '66', labelBackgroundColor: TC.surface2 },
+        horzLine: { color: TC.accent + '66', labelBackgroundColor: TC.surface2 },
+      },
+      rightPriceScale: { borderColor: TC.border },
+      timeScale: { borderColor: TC.border, timeVisible: false },
+      width: ref.current.clientWidth,
+      height: 210,
+    })
+
+    const series = chart.addLineSeries({ color: TC.accent, lineWidth: 2, priceLineVisible: false })
+    const baseline = chart.addLineSeries({ color: TC.border, lineWidth: 1, lineStyle: 2, priceLineVisible: false, crosshairMarkerVisible: false })
+
+    const now = Math.floor(Date.now() / 1000)
+    const step = 86400
+    const data = curve.map((v, i) => ({ time: (now - (curve.length - i) * step) as Time, value: v }))
+    series.setData(data)
+    baseline.setData([{ time: data[0].time, value: capital }, { time: data[data.length - 1].time, value: capital }])
+    chart.timeScale().fitContent()
+    inst.current = chart
+
+    const ro = new ResizeObserver(() => { inst.current?.applyOptions({ width: ref.current!.clientWidth }) })
+    ro.observe(ref.current)
+    return () => { ro.disconnect(); inst.current?.remove(); inst.current = null }
+  }, [curve, capital])
+
+  return <div ref={ref} style={{ width: '100%' }}/>
+}
+
+const inputStyle: React.CSSProperties = {
+  padding: '7px 10px', background: TC.surface2, border: `1px solid ${TC.border}`,
+  borderRadius: 5, color: TC.text, fontFamily: TC.fontMono, fontSize: 12, outline: 'none',
+}
+
+export default function Backtest() {
+  const [symbol,     setSymbol]     = useState('BTC/USDT')
+  const [exchange,   setExchange]   = useState('binance')
+  const [dateFrom,   setDateFrom]   = useState('2025-01-01')
+  const [dateTo,     setDateTo]     = useState('2025-04-01')
+  const [capital,    setCapital]    = useState(10000)
+  const [running,    setRunning]    = useState(false)
+  const [result,     setResult]     = useState<BacktestResult | null>(null)
+
+  const run = async () => {
+    setRunning(true)
+    try {
+      const res = await api.runBacktest({ symbol, exchange, initial_capital: capital })
+      setResult(res)
+    } catch { /* ignore */ }
+    setRunning(false)
+  }
+
+  const tradeColumns: ColDef<BacktestTrade>[] = [
+    { key: 'time',     label: 'Time',    render: v => <span style={{ fontFamily: TC.fontMono, color: TC.textMuted, fontSize: 11 }}>{v ? new Date(String(v)).toLocaleString() : '—'}</span> },
+    { key: 'side',     label: 'Side',    render: v => <TCBadge variant={String(v).toUpperCase() === 'BUY' ? 'buy' : 'sell'}>{String(v)}</TCBadge> },
+    { key: 'price',    label: 'Price',   right: true, render: v => <span style={{ fontFamily: TC.fontMono }}>${Number(v).toLocaleString()}</span> },
+    { key: 'quantity', label: 'Qty',     right: true, render: v => <span style={{ fontFamily: TC.fontMono }}>{Number(v).toFixed(4)}</span> },
+    { key: 'pnl',      label: 'P&L',     right: true, render: v => (
+      <span style={{ fontFamily: TC.fontMono, color: Number(v) >= 0 ? TC.green : TC.red, fontWeight: 600 }}>
+        {Number(v) >= 0 ? '+' : ''}${Number(v).toFixed(2)}
+      </span>
+    )},
+  ]
+
   return (
-    <div className="bg-surface-raised border border-surface-border rounded-lg p-3">
-      <p className="text-xs text-gray-400 mb-1">{label}</p>
-      <p className={`text-sm font-semibold ${positive === undefined ? 'text-white' : positive ? 'text-green-400' : 'text-red-400'}`}>{value}</p>
+    <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* Controls */}
+      <TCCard style={{ padding: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 14, flexWrap: 'wrap' }}>
+          <div>
+            <div style={{ color: TC.textMuted, fontSize: 9.5, fontFamily: TC.fontMono, letterSpacing: '0.08em', marginBottom: 5, textTransform: 'uppercase' }}>Symbol</div>
+            <input value={symbol} onChange={e => setSymbol(e.target.value)} style={inputStyle}/>
+          </div>
+          <div>
+            <div style={{ color: TC.textMuted, fontSize: 9.5, fontFamily: TC.fontMono, letterSpacing: '0.08em', marginBottom: 5, textTransform: 'uppercase' }}>From</div>
+            <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ ...inputStyle, colorScheme: 'dark' }}/>
+          </div>
+          <div>
+            <div style={{ color: TC.textMuted, fontSize: 9.5, fontFamily: TC.fontMono, letterSpacing: '0.08em', marginBottom: 5, textTransform: 'uppercase' }}>To</div>
+            <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ ...inputStyle, colorScheme: 'dark' }}/>
+          </div>
+          <div>
+            <div style={{ color: TC.textMuted, fontSize: 9.5, fontFamily: TC.fontMono, letterSpacing: '0.08em', marginBottom: 5, textTransform: 'uppercase' }}>Initial Capital (USDT)</div>
+            <input type="number" value={capital} onChange={e => setCapital(parseFloat(e.target.value) || 10000)}
+              style={{ ...inputStyle, color: TC.accent, width: 150 }}/>
+          </div>
+          <button onClick={run} disabled={running} style={{
+            marginLeft: 'auto', padding: '8px 22px', borderRadius: 5, cursor: running ? 'not-allowed' : 'pointer',
+            background: running ? TC.surface2 : TC.accent,
+            border: `1px solid ${running ? TC.border : TC.accent}`,
+            color: running ? TC.textMid : TC.bg,
+            fontFamily: TC.fontMono, fontSize: 11, fontWeight: 700, letterSpacing: '0.06em',
+            transition: 'all 0.2s',
+          }}>
+            {running ? 'RUNNING…' : '▶ RUN BACKTEST'}
+          </button>
+        </div>
+      </TCCard>
+
+      {result && (
+        <>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <StatCard label="Total Return"  value={`+${result.total_pnl.toFixed(2)}`}        color={TC.green}/>
+            <StatCard label="Sharpe Ratio"  value={result.sharpe_ratio?.toFixed(2) ?? '—'}   color={TC.accent}/>
+            <StatCard label="Win Rate"      value={`${(result.win_rate * 100).toFixed(1)}%`}  color={TC.green}/>
+            <StatCard label="Max Drawdown"  value={`${(result.max_drawdown * 100).toFixed(1)}%`} color={TC.red}/>
+            <StatCard label="Total Trades"  value={String(result.num_trades)}/>
+          </div>
+
+          <TCCard>
+            <TCSectionHeader title="Equity Curve" right={
+              <span style={{ color: TC.textMuted, fontSize: 9, fontFamily: TC.fontMono }}>Initial: ${capital.toLocaleString()}</span>
+            }/>
+            <EquityChart curve={result.equity_curve} capital={capital}/>
+          </TCCard>
+
+          <TCCard>
+            <TCSectionHeader title="Trade Log" right={<TCBadge>{result.trades.length} trades</TCBadge>}/>
+            <TCTable columns={tradeColumns} rows={result.trades} emptyMsg="No trades"/>
+          </TCCard>
+        </>
+      )}
+
+      {!result && !running && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, color: TC.textMuted, fontFamily: TC.fontMono, fontSize: 13 }}>
+          Configure parameters and click Run Backtest
+        </div>
+      )}
     </div>
   )
 }

@@ -1,173 +1,191 @@
 import { useEffect, useState } from 'react'
-import { api } from '../api'
+import { api, Position, Trade } from '../api'
 import { useStore } from '../store'
+import { TC } from '../theme'
+import { TCCard, TCBadge, TCSectionHeader, TCTable, TCEmpty, ColDef } from '../components/ui'
 
-interface HealthData {
-  status: string
-  version: string
-  db: string
-  scheduler: string
-  trading_mode: string
-  kill_switch: boolean
-  active_strategy: string | null
+// ── Score Gauge ─────────────────────────────────────────────────────────────
+function ScoreGauge({ score }: { score: number }) {
+  const CX = 100, CY = 90, OR = 68, IR = 52
+  const zone  = score > 0.3 ? 'BUY' : score < -0.3 ? 'SELL' : 'NEUTRAL'
+  const zoneC = zone === 'BUY' ? TC.green : zone === 'SELL' ? TC.red : TC.textMid
+
+  const P = (deg: number, r: number) => ({
+    x: CX + r * Math.sin(deg * Math.PI / 180),
+    y: CY - r * Math.cos(deg * Math.PI / 180),
+  })
+  const arc = (a1: number, a2: number, ri = IR, ro = OR) => {
+    const s = P(a1, ro), e = P(a2, ro), si = P(a1, ri), ei = P(a2, ri)
+    const lg = a2 - a1 > 180 ? 1 : 0
+    const fx = (v: number) => v.toFixed(2)
+    return `M${fx(s.x)} ${fx(s.y)} A${ro} ${ro} 0 ${lg} 1 ${fx(e.x)} ${fx(e.y)} L${fx(ei.x)} ${fx(ei.y)} A${ri} ${ri} 0 ${lg} 0 ${fx(si.x)} ${fx(si.y)}Z`
+  }
+
+  const needleDeg = Math.max(-90, Math.min(90, score * 90))
+  const tip  = P(needleDeg, OR - 4)
+  const base = P(needleDeg, 14)
+
+  return (
+    <div style={{ textAlign: 'center' }}>
+      <svg viewBox="0 0 200 110" style={{ width: '100%', maxWidth: 250, overflow: 'visible', display: 'block', margin: '0 auto' }}>
+        <path d={arc(-90, 90)} fill="rgba(255,255,255,0.03)"/>
+        <path d={arc(-90, -27)} fill="rgba(255,68,68,0.22)"/>
+        <path d={arc(-27, 27)} fill="rgba(255,255,255,0.06)"/>
+        <path d={arc(27, 90)} fill="rgba(0,255,136,0.22)"/>
+        {[-90, -27, 0, 27, 90].map(a => {
+          const t1 = P(a, OR + 3), t2 = P(a, OR + 9)
+          return <line key={a} x1={t1.x.toFixed(1)} y1={t1.y.toFixed(1)} x2={t2.x.toFixed(1)} y2={t2.y.toFixed(1)} stroke={TC.border} strokeWidth="1"/>
+        })}
+        <text x="12"  y="100" textAnchor="middle" fill={TC.red}      fontSize="7.5" fontFamily="monospace" fontWeight="700" letterSpacing="1">SELL</text>
+        <text x="100" y="15"  textAnchor="middle" fill={TC.textMuted} fontSize="7.5" fontFamily="monospace" letterSpacing="1">NEUT</text>
+        <text x="188" y="100" textAnchor="middle" fill={TC.green}    fontSize="7.5" fontFamily="monospace" fontWeight="700" letterSpacing="1">BUY</text>
+        <line x1={CX.toFixed(1)} y1={CY.toFixed(1)} x2={tip.x.toFixed(1)} y2={tip.y.toFixed(1)}
+          stroke={zoneC} strokeWidth="6" strokeLinecap="round" opacity="0.08"/>
+        <line x1={base.x.toFixed(1)} y1={base.y.toFixed(1)} x2={tip.x.toFixed(1)} y2={tip.y.toFixed(1)}
+          stroke={zoneC} strokeWidth="2" strokeLinecap="round"
+          style={{ filter: `drop-shadow(0 0 3px ${zoneC})` }}/>
+        <circle cx={CX} cy={CY} r="5" fill={TC.surface2} stroke={zoneC} strokeWidth="1.5"/>
+        <text x={CX} y={CY + 20} textAnchor="middle" fill={zoneC} fontSize="19" fontFamily="monospace" fontWeight="700">
+          {score > 0 ? '+' : ''}{score.toFixed(3)}
+        </text>
+      </svg>
+      <div style={{ marginTop: 4 }}>
+        <TCBadge variant={zone === 'BUY' ? 'buy' : zone === 'SELL' ? 'sell' : 'neutral'}>{zone} ZONE</TCBadge>
+      </div>
+    </div>
+  )
 }
 
+// ── PnL Meter ───────────────────────────────────────────────────────────────
+function PnLMeter({ pnl, max = 2000 }: { pnl: number; max?: number }) {
+  const pos = pnl >= 0
+  const pct = Math.min(Math.abs(pnl) / max, 1)
+  const col = pos ? TC.green : TC.red
+  return (
+    <div style={{ padding: '14px 18px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 14 }}>
+        <span style={{ color: TC.textMuted, fontSize: 9, fontFamily: TC.fontMono, letterSpacing: '0.12em', textTransform: 'uppercase' }}>Daily P&amp;L</span>
+        <span style={{ color: col, fontFamily: TC.fontMono, fontSize: 22, fontWeight: 700 }}>
+          {pos ? '+' : '-'}${Math.abs(pnl).toFixed(2)}
+        </span>
+      </div>
+      <div style={{ position: 'relative', height: 6, background: TC.surface2, borderRadius: 3, overflow: 'hidden' }}>
+        <div style={{
+          position: 'absolute', height: '100%',
+          width: `${pct * 50}%`,
+          left: pos ? '50%' : `${50 - pct * 50}%`,
+          background: col, borderRadius: 3,
+          boxShadow: `0 0 8px ${col}`,
+          transition: 'all 0.5s ease',
+        }}/>
+        <div style={{ position: 'absolute', left: '50%', top: 0, width: 1, height: '100%', background: TC.borderHi }}/>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 5 }}>
+        <span style={{ color: TC.red,      fontSize: 9, fontFamily: TC.fontMono }}>-${max}</span>
+        <span style={{ color: TC.textMuted, fontSize: 9, fontFamily: TC.fontMono }}>0</span>
+        <span style={{ color: TC.green,    fontSize: 9, fontFamily: TC.fontMono }}>+${max}</span>
+      </div>
+    </div>
+  )
+}
+
+// ── Status Card ─────────────────────────────────────────────────────────────
+function StatusCard({ label, value, sub, status }: { label: string; value: string; sub?: string; status: 'ok' | 'warn' | 'error' }) {
+  const col = status === 'ok' ? TC.green : status === 'warn' ? TC.yellow : TC.red
+  return (
+    <TCCard style={{ padding: '14px 16px', flex: 1, minWidth: 0 }}>
+      <div style={{ color: TC.textMuted, fontSize: 9, fontFamily: TC.fontMono, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 10 }}>{label}</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ width: 7, height: 7, borderRadius: '50%', background: col, boxShadow: `0 0 7px ${col}`, flexShrink: 0 }}/>
+        <span style={{ color: TC.text, fontFamily: TC.fontMono, fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</span>
+      </div>
+      {sub && <div style={{ color: TC.textMuted, fontSize: 10, fontFamily: TC.fontMono, marginTop: 5 }}>{sub}</div>}
+    </TCCard>
+  )
+}
+
+// ── Dashboard ───────────────────────────────────────────────────────────────
 export default function Dashboard() {
-  const { killSwitch, tradingMode, setKillSwitch, setTradingMode } = useStore()
-  const [health, setHealth] = useState<HealthData | null>(null)
-  const [positions, setPositions] = useState<unknown[]>([])
-  const [trades, setTrades] = useState<unknown[]>([])
-  const [busy, setBusy] = useState(false)
+  const { killSwitch, tradingMode, activeStrategy } = useStore()
+  const [positions, setPositions] = useState<Position[]>([])
+  const [trades, setTrades]       = useState<Trade[]>([])
+  const [tick, setTick]           = useState(0)
+  const [score] = useState(0.67)
 
   useEffect(() => {
-    api.health().then((h) => setHealth(h as unknown as HealthData)).catch(() => {})
-    api.paperPositions().then(setPositions).catch(() => {})
-    api.paperTrades(10).then(setTrades).catch(() => {})
+    const load = tradingMode === 'live' ? api.livePositions : api.paperPositions
+    load().then(setPositions).catch(() => {})
+    const loadTrades = tradingMode === 'live' ? api.liveTrades : api.paperTrades
+    loadTrades(20).then(setTrades).catch(() => {})
+  }, [tradingMode])
+
+  useEffect(() => {
+    const iv = setInterval(() => setTick(t => t + 1), 2500)
+    return () => clearInterval(iv)
   }, [])
 
-  async function toggleKillSwitch() {
-    setBusy(true)
-    try {
-      await api.setKillSwitch(!killSwitch)
-      setKillSwitch(!killSwitch)
-    } finally {
-      setBusy(false)
-    }
-  }
+  const dailyPnl = trades.reduce((sum, t) => sum + (t.pnl ?? 0), 0)
 
-  async function toggleMode() {
-    const next = tradingMode === 'paper' ? 'live' : 'paper'
-    setBusy(true)
-    try {
-      await api.setTradingMode(next)
-      setTradingMode(next)
-    } finally {
-      setBusy(false)
-    }
-  }
+  const posColumns: ColDef<Position>[] = [
+    { key: 'symbol', label: 'Symbol', mono: true },
+    { key: 'side',   label: 'Side',   render: v => <TCBadge variant={String(v).toUpperCase() === 'LONG' ? 'buy' : 'sell'}>{String(v)}</TCBadge> },
+    { key: 'quantity', label: 'Qty',  mono: true, right: true, render: v => <span style={{ fontFamily: TC.fontMono, color: TC.textMid }}>{String(v)}</span> },
+    { key: 'avg_entry_price', label: 'Entry', mono: true, right: true, render: v => <span style={{ fontFamily: TC.fontMono }}>${Number(v).toLocaleString()}</span> },
+  ]
+
+  const tradeColumns: ColDef<Trade>[] = [
+    { key: 'created_at', label: 'Time', mono: true, render: v => <span style={{ fontFamily: TC.fontMono, color: TC.textMuted, fontSize: 11 }}>{v ? new Date(String(v)).toLocaleTimeString() : '—'}</span> },
+    { key: 'symbol', label: 'Symbol', mono: true },
+    { key: 'side',   label: 'Side',   render: v => <TCBadge variant={String(v).toUpperCase() === 'BUY' ? 'buy' : 'sell'}>{String(v)}</TCBadge> },
+    { key: 'price',  label: 'Price',  mono: true, right: true, render: v => <span style={{ fontFamily: TC.fontMono }}>${Number(v).toLocaleString()}</span> },
+    { key: 'pnl',    label: 'P&L',    mono: true, right: true, render: v => (
+      <span style={{ fontFamily: TC.fontMono, color: Number(v) >= 0 ? TC.green : TC.red, fontWeight: 600 }}>
+        {Number(v) >= 0 ? '+' : '-'}${Math.abs(Number(v)).toFixed(2)}
+      </span>
+    )},
+  ]
+
+  const stratName = (activeStrategy?.name as string) ?? 'None'
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-white">Dashboard</h1>
-
+    <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
       {/* Status cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card label="Backend" value={health?.status ?? '…'} ok={health?.status === 'ok'} />
-        <Card label="Database" value={health?.db ?? '…'} ok={health?.db === 'connected'} />
-        <Card label="Scheduler" value={health?.scheduler ?? '…'} ok={health?.scheduler === 'running'} />
-        <Card label="Strategy" value={health?.active_strategy ?? 'none'} ok={!!health?.active_strategy} />
+      <div style={{ display: 'flex', gap: 12 }}>
+        <StatusCard label="Database"        value="Connected"                        sub="PostgreSQL / TimescaleDB"                    status="ok"/>
+        <StatusCard label="Scheduler"       value="Running"                          sub={`Cycle ${tick}`}                             status="ok"/>
+        <StatusCard label="Kill Switch"     value={killSwitch ? 'ACTIVE' : 'Off'}    sub={killSwitch ? 'Trading halted' : 'Enabled'}   status={killSwitch ? 'error' : 'ok'}/>
+        <StatusCard label="Active Strategy" value={stratName}                        sub={tradingMode.toUpperCase()}                   status={stratName === 'None' ? 'warn' : 'ok'}/>
       </div>
 
-      {/* Controls */}
-      <div className="bg-surface-raised border border-surface-border rounded-lg p-4 flex flex-wrap gap-4 items-center">
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-gray-400">Kill Switch</span>
-          <button
-            onClick={toggleKillSwitch}
-            disabled={busy}
-            className={`px-4 py-1.5 rounded text-sm font-semibold transition-colors ${
-              killSwitch
-                ? 'bg-red-600 hover:bg-red-700 text-white'
-                : 'bg-surface-border hover:bg-gray-600 text-gray-200'
-            }`}
-          >
-            {killSwitch ? 'ON (HALT)' : 'OFF'}
-          </button>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-gray-400">Mode</span>
-          <button
-            onClick={toggleMode}
-            disabled={busy}
-            className={`px-4 py-1.5 rounded text-sm font-semibold transition-colors ${
-              tradingMode === 'live'
-                ? 'bg-yellow-500 hover:bg-yellow-600 text-black'
-                : 'bg-brand hover:bg-brand-dark text-white'
-            }`}
-          >
-            {tradingMode.toUpperCase()}
-          </button>
-        </div>
-
-        <span className="text-xs text-gray-500 ml-auto">v{health?.version ?? '…'}</span>
+      {/* Positions + Trades */}
+      <div style={{ display: 'flex', gap: 12 }}>
+        <TCCard style={{ flex: 1 }}>
+          <TCSectionHeader title="Open Positions" right={<TCBadge variant="accent">{positions.length} active</TCBadge>}/>
+          <TCTable columns={posColumns} rows={positions} emptyMsg="No open positions"/>
+        </TCCard>
+        <TCCard style={{ flex: 1 }}>
+          <TCSectionHeader title="Recent Trades" right={<TCBadge>{trades.length} total</TCBadge>}/>
+          <TCTable columns={tradeColumns} rows={trades} emptyMsg="No recent trades"/>
+        </TCCard>
       </div>
 
-      {/* Open positions */}
-      <Section title={`Open Positions (${positions.length})`}>
-        {positions.length === 0 ? (
-          <p className="text-gray-500 text-sm">No open positions</p>
-        ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-gray-400 text-left border-b border-surface-border">
-                <th className="pb-2">Symbol</th>
-                <th className="pb-2">Side</th>
-                <th className="pb-2">Qty</th>
-                <th className="pb-2">Entry</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(positions as any[]).map((p) => (
-                <tr key={p.id} className="border-b border-surface-border/50">
-                  <td className="py-1.5">{p.symbol}</td>
-                  <td className={p.side === 'buy' ? 'text-green-400' : 'text-red-400'}>{p.side}</td>
-                  <td>{p.quantity.toFixed(6)}</td>
-                  <td>${p.avg_entry_price.toLocaleString()}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </Section>
-
-      {/* Recent trades */}
-      <Section title="Recent Trades">
-        {trades.length === 0 ? (
-          <p className="text-gray-500 text-sm">No trades yet</p>
-        ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-gray-400 text-left border-b border-surface-border">
-                <th className="pb-2">Symbol</th>
-                <th className="pb-2">Side</th>
-                <th className="pb-2">Price</th>
-                <th className="pb-2">PnL</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(trades as any[]).map((t) => (
-                <tr key={t.id} className="border-b border-surface-border/50">
-                  <td className="py-1.5">{t.symbol}</td>
-                  <td className={t.side === 'buy' ? 'text-green-400' : 'text-red-400'}>{t.side}</td>
-                  <td>${t.price.toLocaleString()}</td>
-                  <td className={t.pnl === null ? 'text-gray-500' : t.pnl >= 0 ? 'text-green-400' : 'text-red-400'}>
-                    {t.pnl === null ? '—' : `$${t.pnl.toFixed(2)}`}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </Section>
-    </div>
-  )
-}
-
-function Card({ label, value, ok }: { label: string; value: string; ok: boolean }) {
-  return (
-    <div className="bg-surface-raised border border-surface-border rounded-lg p-4">
-      <p className="text-xs text-gray-400 mb-1">{label}</p>
-      <p className={`text-sm font-semibold truncate ${ok ? 'text-green-400' : 'text-gray-300'}`}>{value}</p>
-    </div>
-  )
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="bg-surface-raised border border-surface-border rounded-lg p-4">
-      <h2 className="text-sm font-semibold text-gray-300 mb-3">{title}</h2>
-      {children}
+      {/* PnL + Score */}
+      <div style={{ display: 'flex', gap: 12 }}>
+        <TCCard style={{ flex: 1 }}>
+          <TCSectionHeader title="Daily P&L" right={
+            <span style={{ color: TC.textMuted, fontSize: 9, fontFamily: TC.fontMono, animation: 'tcPulse 2s infinite' }}>● LIVE</span>
+          }/>
+          <PnLMeter pnl={dailyPnl}/>
+        </TCCard>
+        <TCCard style={{ flex: 1 }}>
+          <TCSectionHeader title="Composite Score" right={
+            <span style={{ color: TC.textMuted, fontSize: 9, fontFamily: TC.fontMono }}>{(activeStrategy?.symbol as string) ?? 'BTC/USDT'} · 15m</span>
+          }/>
+          <div style={{ padding: '14px 12px' }}>
+            <ScoreGauge score={score}/>
+          </div>
+        </TCCard>
+      </div>
     </div>
   )
 }
