@@ -49,11 +49,7 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
-    command: >
-      uv run uvicorn app.main:app
-      --host 0.0.0.0
-      --port 8000
-      --workers 2
+    # entrypoint.sh runs: alembic upgrade head → uvicorn
 
   frontend:
     image: ghcr.io/${GHCR_OWNER}/tradecore-frontend:latest
