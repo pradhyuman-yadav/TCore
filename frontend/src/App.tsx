@@ -38,12 +38,18 @@ function AppShell() {
     api.setKillSwitch(enabled).catch(() => {})
   }
 
+  const handleModeChange = (mode: string) => {
+    setTradingMode(mode)
+    api.setTradingMode(mode).catch(() => {})
+  }
+
   const strategyName = (activeStrategy?.name as string) ?? ''
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: TC.bg, color: TC.text, fontFamily: TC.fontUI, overflow: 'hidden' }}>
       <TCNavbar
         mode={tradingMode}
+        onModeChange={handleModeChange}
         killSwitch={killSwitch}
         setKillSwitch={handleKillSwitch}
         wsOk={wsStatus === 'open'}

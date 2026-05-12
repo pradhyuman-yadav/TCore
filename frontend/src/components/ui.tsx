@@ -255,16 +255,78 @@ export const TCIcons = {
   ),
 }
 
+// ── Mode Toggle ─────────────────────────────────────────────────────────────
+interface ModeToggleProps { mode: string; onChange: (m: string) => void }
+const ModeToggle = ({ mode, onChange }: ModeToggleProps) => {
+  const [open, setOpen] = React.useState(false)
+  const isLive = mode === 'live'
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        title="Switch trading mode"
+        style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          padding: '4px 10px', borderRadius: 5, cursor: 'pointer',
+          border: `1px solid ${isLive ? TC.red : TC.yellow}`,
+          background: isLive ? TC.redDim : TC.yellowDim,
+          color: isLive ? TC.red : TC.yellow,
+          fontFamily: TC.fontMono, fontSize: 11, fontWeight: 700,
+          letterSpacing: '0.07em', transition: 'all 0.15s',
+        }}
+      >
+        {mode.toUpperCase()}
+        <svg width="8" height="8" viewBox="0 0 8 8" fill="currentColor">
+          <path d={open ? 'M0 6L4 2L8 6' : 'M0 2L4 6L8 2'}/>
+        </svg>
+      </button>
+
+      {open && (
+        <div style={{
+          position: 'absolute', top: '110%', right: 0, zIndex: 300,
+          background: TC.surface2, border: `1px solid ${TC.borderHi}`,
+          borderRadius: 7, overflow: 'hidden', minWidth: 160,
+          boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+        }}>
+          <div style={{ padding: '8px 12px 6px', color: TC.textMuted, fontSize: 9, fontFamily: TC.fontMono, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+            Trading Mode
+          </div>
+          {(['paper', 'live'] as const).map(m => (
+            <button key={m} onClick={() => { onChange(m); setOpen(false) }} style={{
+              width: '100%', padding: '9px 14px', display: 'flex', alignItems: 'center', gap: 10,
+              border: 'none', cursor: 'pointer', textAlign: 'left',
+              background: mode === m ? (m === 'live' ? TC.redDim : TC.yellowDim) : 'transparent',
+              color: mode === m ? (m === 'live' ? TC.red : TC.yellow) : TC.textMid,
+              fontFamily: TC.fontMono, fontSize: 12, fontWeight: mode === m ? 700 : 400,
+              transition: 'background 0.1s',
+            }}>
+              <div style={{ width: 7, height: 7, borderRadius: '50%', background: m === 'live' ? TC.red : TC.yellow, boxShadow: mode === m ? `0 0 6px ${m === 'live' ? TC.red : TC.yellow}` : 'none' }}/>
+              {m.toUpperCase()}
+              {m === 'live' && <span style={{ marginLeft: 'auto', fontSize: 9, color: TC.red, opacity: 0.7 }}>REAL MONEY</span>}
+              {mode === m && <span style={{ marginLeft: m === 'paper' ? 'auto' : 0 }}>✓</span>}
+            </button>
+          ))}
+          <div style={{ padding: '6px 12px 8px', borderTop: `1px solid ${TC.border}` }}>
+            <span style={{ color: TC.textMuted, fontSize: 9, fontFamily: TC.fontMono }}>Persisted to DB</span>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Navbar ──────────────────────────────────────────────────────────────────
 interface NavbarProps {
   mode: string
+  onModeChange: (m: string) => void
   killSwitch: boolean
   setKillSwitch: (v: boolean) => void
   wsOk: boolean
   dbOk: boolean
   strategyName: string
 }
-export const TCNavbar = ({ mode, killSwitch, setKillSwitch, wsOk, dbOk, strategyName }: NavbarProps) => {
+export const TCNavbar = ({ mode, onModeChange, killSwitch, setKillSwitch, wsOk, dbOk, strategyName }: NavbarProps) => {
   const [ksHover, setKsHover] = React.useState(false)
   return (
     <nav style={{
@@ -290,7 +352,7 @@ export const TCNavbar = ({ mode, killSwitch, setKillSwitch, wsOk, dbOk, strategy
         <span style={{ color: TC.text, fontFamily: TC.fontUI, fontSize: 13, fontWeight: 500 }}>
           {strategyName || 'No Active Strategy'}
         </span>
-        <TCBadge variant={mode === 'live' ? 'live' : 'paper'}>{mode.toUpperCase()}</TCBadge>
+        <ModeToggle mode={mode} onChange={onModeChange}/>
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexShrink: 0 }}>

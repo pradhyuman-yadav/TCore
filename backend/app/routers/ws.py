@@ -4,7 +4,7 @@ from app.ws.manager import ws_manager
 
 router = APIRouter()
 
-VALID_CHANNELS = {"signals", "trades", "portfolio"}
+VALID_CHANNELS = {"signals", "trades", "portfolio", "prices"}
 
 
 @router.websocket("/ws/{channel}")

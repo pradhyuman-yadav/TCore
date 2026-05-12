@@ -176,6 +176,43 @@ async def run_trading_cycle() -> None:
         log.error("trading_cycle.error", error=str(exc))
 
 
+async def broadcast_price_ticks() -> None:
+    """Broadcast latest 1m candle for active strategy symbol → 'prices' WS channel."""
+    from app.services.exchange_client import get_exchange_client
+    from app.ws.manager import ws_manager
+
+    if ws_manager.connection_count("prices") == 0:
+        return  # no clients, skip exchange call
+
+    strategy = app_state.active_strategy
+    if not strategy:
+        return
+
+    symbol: str = strategy.get("symbol", "")
+    exchange: str = strategy.get("exchange", "")
+    if not symbol:
+        return
+
+    try:
+        client = get_exchange_client()
+        bars = await client.fetch_ohlcv(symbol, "1m", limit=1)
+        if bars:
+            bar = bars[0]
+            await ws_manager.broadcast("prices", {
+                "type": "tick",
+                "symbol": symbol,
+                "exchange": exchange,
+                "time": bar[0] // 1000,   # ms → s
+                "open":   bar[1],
+                "high":   bar[2],
+                "low":    bar[3],
+                "close":  bar[4],
+                "volume": bar[5],
+            })
+    except Exception as exc:
+        log.warning("price_tick.error", error=str(exc))
+
+
 def setup_scheduler(scheduler: AsyncIOScheduler) -> None:
     cadence = _DEFAULT_CADENCE
     strategy = app_state.active_strategy
@@ -190,4 +227,15 @@ def setup_scheduler(scheduler: AsyncIOScheduler) -> None:
         replace_existing=True,
         misfire_grace_time=30,
     )
+
+    # Fast price tick — every 10s, only costs one REST call when clients are connected
+    scheduler.add_job(
+        broadcast_price_ticks,
+        trigger="interval",
+        seconds=10,
+        id="price_ticks",
+        replace_existing=True,
+        misfire_grace_time=5,
+    )
+
     log.info("scheduler.job_registered", cadence_seconds=cadence)

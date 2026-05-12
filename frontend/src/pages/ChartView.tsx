@@ -3,6 +3,8 @@ import { createChart, IChartApi, ISeriesApi, CandlestickData, Time } from 'light
 import { api, OhlcvBar } from '../api'
 import { TC } from '../theme'
 import { TCCard, TCBadge, TCSectionHeader } from '../components/ui'
+import { usePriceFeed } from '../hooks/useWebSocket'
+import type { PriceTick } from '../store'
 
 const SYMBOLS = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT']
 const TIMEFRAMES = ['1m', '5m', '15m', '1h', '4h', '1d']
@@ -57,9 +59,27 @@ export default function ChartView() {
   const [syncDays, setSyncDays]     = useState(90)
   const [score] = useState(0.67)
 
-  const containerRef = useRef<HTMLDivElement>(null)
-  const chartRef     = useRef<IChartApi | null>(null)
-  const seriesRef    = useRef<ISeriesApi<'Candlestick'> | null>(null)
+  const containerRef  = useRef<HTMLDivElement>(null)
+  const chartRef      = useRef<IChartApi | null>(null)
+  const seriesRef     = useRef<ISeriesApi<'Candlestick'> | null>(null)
+  const symbolRef     = useRef(symbol)
+  const [livePrice, setLivePrice] = useState<number | null>(null)
+  symbolRef.current = symbol
+
+  // Live price feed — updates last candle without re-rendering
+  usePriceFeed((tick: PriceTick) => {
+    if (tick.symbol !== symbolRef.current) return
+    setLivePrice(tick.close)
+    if (seriesRef.current) {
+      seriesRef.current.update({
+        time:   tick.time as Time,
+        open:   tick.open,
+        high:   tick.high,
+        low:    tick.low,
+        close:  tick.close,
+      })
+    }
+  })
 
   const zone = score > 0.3 ? 'BUY' : score < -0.3 ? 'SELL' : 'NEUTRAL'
 
@@ -207,8 +227,16 @@ export default function ChartView() {
           )}
         </div>
 
-        {/* Score pill */}
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
+        {/* Live price + score */}
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 16 }}>
+          {livePrice !== null && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ width: 6, height: 6, borderRadius: '50%', background: TC.green, boxShadow: `0 0 6px ${TC.green}`, animation: 'tcPulse 2s infinite' }}/>
+              <span style={{ fontFamily: TC.fontMono, fontSize: 15, fontWeight: 700, color: TC.text }}>
+                ${livePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
+            </div>
+          )}
           <TCBadge variant={zone === 'BUY' ? 'buy' : zone === 'SELL' ? 'sell' : 'neutral'}>{zone} ZONE</TCBadge>
           <span style={{
             color: zone === 'BUY' ? TC.green : zone === 'SELL' ? TC.red : TC.textMid,
