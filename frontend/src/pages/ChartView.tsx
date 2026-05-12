@@ -1,15 +1,116 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { createChart, IChartApi, ISeriesApi, CandlestickData, Time } from 'lightweight-charts'
-import { api, OhlcvBar } from '../api'
+import { useEffect, useRef, useState } from 'react'
+import { api } from '../api'
 import { TC } from '../theme'
-import { TCCard, TCBadge, TCSectionHeader } from '../components/ui'
-import { usePriceFeed } from '../hooks/useWebSocket'
-import type { PriceTick } from '../store'
+import { TCBadge, TCSectionHeader } from '../components/ui'
 
-const SYMBOLS = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT']
-const TIMEFRAMES = ['1m', '5m', '15m', '1h', '4h', '1d']
-const EXCHANGE = 'binance'
+// ── TradingView helpers ─────────────────────────────────────────────────────
+const EXCHANGES: Record<string, string> = {
+  binanceus: 'BINANCEUS',
+  binance:   'BINANCE',
+  coinbase:  'COINBASE',
+  kraken:    'KRAKEN',
+  bybit:     'BYBIT',
+}
 
+// BTC/USDT → BTCUSDT
+const toTvSymbol = (symbol: string, exchange: string): string => {
+  const pair = symbol.replace('/', '')
+  const ex   = EXCHANGES[exchange.toLowerCase()] ?? exchange.toUpperCase()
+  return `${ex}:${pair}`
+}
+
+// 15m → 15, 1h → 60, 4h → 240, 1d → D
+const toTvInterval = (tf: string): string => {
+  const map: Record<string, string> = {
+    '1m': '1', '3m': '3', '5m': '5', '15m': '15', '30m': '30',
+    '1h': '60', '2h': '120', '4h': '240', '1d': 'D', '1w': 'W',
+  }
+  return map[tf] ?? '15'
+}
+
+// ── TradingView widget component ────────────────────────────────────────────
+declare global {
+  interface Window {
+    TradingView?: {
+      widget: new (config: Record<string, unknown>) => void
+    }
+  }
+}
+
+let tvScriptLoaded = false
+let tvScriptCallbacks: Array<() => void> = []
+
+function loadTvScript(cb: () => void) {
+  if (tvScriptLoaded) { cb(); return }
+  tvScriptCallbacks.push(cb)
+  if (tvScriptCallbacks.length > 1) return   // already loading
+  const s = document.createElement('script')
+  s.src = 'https://s3.tradingview.com/tv.js'
+  s.async = true
+  s.onload = () => { tvScriptLoaded = true; tvScriptCallbacks.forEach(f => f()); tvScriptCallbacks = [] }
+  document.head.appendChild(s)
+}
+
+interface TVChartProps {
+  symbol: string
+  exchange: string
+  timeframe: string
+  containerId: string
+}
+
+function TradingViewChart({ symbol, exchange, timeframe, containerId }: TVChartProps) {
+  useEffect(() => {
+    const tvSym = toTvSymbol(symbol, exchange)
+    const tvItv = toTvInterval(timeframe)
+
+    loadTvScript(() => {
+      if (!window.TradingView) return
+      // Clear previous widget
+      const el = document.getElementById(containerId)
+      if (el) el.innerHTML = ''
+
+      new window.TradingView.widget({
+        container_id:      containerId,
+        autosize:          true,
+        symbol:            tvSym,
+        interval:          tvItv,
+        timezone:          'Etc/UTC',
+        theme:             'dark',
+        style:             '1',          // candlestick
+        locale:            'en',
+        toolbar_bg:        TC.surface,
+        gridLineColor:     'rgba(255,255,255,0.04)',
+        backgroundColor:   TC.bg,
+        enable_publishing: false,
+        withdateranges:    true,
+        hide_side_toolbar: false,
+        allow_symbol_change: false,
+        save_image:        false,
+        studies: [],
+        overrides: {
+          'mainSeriesProperties.candleStyle.upColor':          TC.green,
+          'mainSeriesProperties.candleStyle.downColor':        TC.red,
+          'mainSeriesProperties.candleStyle.borderUpColor':    TC.green,
+          'mainSeriesProperties.candleStyle.borderDownColor':  TC.red,
+          'mainSeriesProperties.candleStyle.wickUpColor':      TC.green,
+          'mainSeriesProperties.candleStyle.wickDownColor':    TC.red,
+          'paneProperties.background':                         TC.bg,
+          'paneProperties.backgroundType':                     'solid',
+          'scalesProperties.textColor':                        TC.textMuted,
+        },
+      })
+    })
+  }, [symbol, exchange, timeframe, containerId])
+
+  return (
+    <div
+      id={containerId}
+      style={{ width: '100%', height: '100%', minHeight: 400 }}
+    />
+  )
+}
+
+// ── Indicator bar ───────────────────────────────────────────────────────────
 const INDICATORS = [
   { key: 'rsi',       label: 'RSI',          weight: 0.25, value: 0.55 },
   { key: 'macd',      label: 'MACD',         weight: 0.20, value: 0.42 },
@@ -41,8 +142,7 @@ function IndicatorBar({ label, value, weight }: { label: string; value: number; 
           position: 'absolute', height: '100%',
           width: `${pctHalf}%`,
           left: value >= 0 ? '50%' : `${50 - pctHalf}%`,
-          background: col, borderRadius: 2,
-          boxShadow: `0 0 5px ${col}55`,
+          background: col, borderRadius: 2, boxShadow: `0 0 5px ${col}55`,
         }}/>
         <div style={{ position: 'absolute', left: '50%', top: 0, width: 1, height: '100%', background: TC.borderHi }}/>
       </div>
@@ -50,105 +150,29 @@ function IndicatorBar({ label, value, weight }: { label: string; value: number; 
   )
 }
 
+// ── ChartView page ──────────────────────────────────────────────────────────
+const SYMBOLS      = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT']
+const TIMEFRAMES   = ['1m', '5m', '15m', '1h', '4h', '1d']
+const EXCHANGE_LIST = ['binanceus', 'binance', 'coinbase', 'kraken']
+
 export default function ChartView() {
-  const [symbol, setSymbol]         = useState('BTC/USDT')
-  const [timeframe, setTimeframe]   = useState('15m')
-  const [barCount, setBarCount]     = useState<number | null>(null)
-  const [syncing, setSyncing]       = useState(false)
+  const [symbol,     setSymbol]     = useState('BTC/USDT')
+  const [exchange,   setExchange]   = useState('binanceus')
+  const [timeframe,  setTimeframe]  = useState('15m')
+  const [syncing,    setSyncing]    = useState(false)
+  const [syncDays,   setSyncDays]   = useState(90)
   const [syncResult, setSyncResult] = useState<string | null>(null)
-  const [syncDays, setSyncDays]     = useState(90)
   const [score] = useState(0.67)
-
-  const containerRef  = useRef<HTMLDivElement>(null)
-  const chartRef      = useRef<IChartApi | null>(null)
-  const seriesRef     = useRef<ISeriesApi<'Candlestick'> | null>(null)
-  const symbolRef     = useRef(symbol)
-  const [livePrice, setLivePrice] = useState<number | null>(null)
-  symbolRef.current = symbol
-
-  // Live price feed — updates last candle without re-rendering
-  usePriceFeed((tick: PriceTick) => {
-    if (tick.symbol !== symbolRef.current) return
-    setLivePrice(tick.close)
-    if (seriesRef.current) {
-      seriesRef.current.update({
-        time:   tick.time as Time,
-        open:   tick.open,
-        high:   tick.high,
-        low:    tick.low,
-        close:  tick.close,
-      })
-    }
-  })
+  const chartId = useRef(`tv_${Math.random().toString(36).slice(2)}`).current
 
   const zone = score > 0.3 ? 'BUY' : score < -0.3 ? 'SELL' : 'NEUTRAL'
-
-  const loadChart = useCallback(async () => {
-    if (!containerRef.current) return
-    if (chartRef.current) { chartRef.current.remove(); chartRef.current = null }
-
-    const chart = createChart(containerRef.current, {
-      layout: { background: { color: TC.bg }, textColor: TC.textMuted, fontFamily: TC.fontMono, fontSize: 11 },
-      grid: { vertLines: { color: 'rgba(255,255,255,0.04)' }, horzLines: { color: 'rgba(255,255,255,0.04)' } },
-      crosshair: {
-        vertLine: { color: TC.accent + '66', labelBackgroundColor: TC.surface2 },
-        horzLine: { color: TC.accent + '66', labelBackgroundColor: TC.surface2 },
-      },
-      rightPriceScale: { borderColor: TC.border },
-      timeScale: { borderColor: TC.border, timeVisible: true },
-      width:  containerRef.current.clientWidth,
-      height: containerRef.current.clientHeight,
-    })
-
-    const series = chart.addCandlestickSeries({
-      upColor:         TC.green,
-      downColor:       TC.red,
-      borderUpColor:   TC.green,
-      borderDownColor: TC.red,
-      wickUpColor:     TC.green,
-      wickDownColor:   TC.red,
-    })
-    chartRef.current  = chart
-    seriesRef.current = series
-
-    try {
-      const bars: OhlcvBar[] = await api.getOhlcv(symbol, EXCHANGE, timeframe, 500)
-      if (bars.length > 0) {
-        const data: CandlestickData[] = bars.map(b => ({
-          time:  (new Date(b.time).getTime() / 1000) as Time,
-          open:  b.open, high: b.high, low: b.low, close: b.close,
-        }))
-        series.setData(data)
-        chart.timeScale().fitContent()
-        setBarCount(bars.length)
-      } else {
-        setBarCount(0)
-      }
-    } catch {
-      setBarCount(0)
-    }
-
-    const ro = new ResizeObserver(() => {
-      if (containerRef.current && chartRef.current) {
-        chartRef.current.applyOptions({ width: containerRef.current.clientWidth, height: containerRef.current.clientHeight })
-      }
-    })
-    ro.observe(containerRef.current)
-    return () => { ro.disconnect(); chart.remove(); chartRef.current = null }
-  }, [symbol, timeframe])
-
-  useEffect(() => {
-    const cleanup = loadChart()
-    return () => { cleanup.then(fn => fn?.()) }
-  }, [loadChart])
 
   const handleSync = async () => {
     setSyncing(true)
     setSyncResult(null)
     try {
-      const res = await api.syncMarket(symbol, EXCHANGE, timeframe, syncDays)
+      const res = await api.syncMarket(symbol, exchange, timeframe, syncDays)
       setSyncResult(`✓ ${res.upserted} bars stored`)
-      await loadChart()
     } catch (e: unknown) {
       setSyncResult(`✗ ${e instanceof Error ? e.message : 'Sync failed'}`)
     }
@@ -174,52 +198,66 @@ export default function ChartView() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+
       {/* Controls bar */}
       <div style={{
         padding: '10px 18px', borderBottom: `1px solid ${TC.border}`,
         display: 'flex', alignItems: 'center', gap: 14, flexShrink: 0,
         background: TC.surface, flexWrap: 'wrap',
       }}>
-        {/* Symbol */}
+        {/* Symbol pills */}
         <div style={{ display: 'flex', gap: 5 }}>
-          {SYMBOLS.map(s => <button key={s} onClick={() => setSymbol(s)} style={pillBtn(symbol === s)}>{s}</button>)}
+          {SYMBOLS.map(s => (
+            <button key={s} onClick={() => setSymbol(s)} style={pillBtn(symbol === s)}>{s}</button>
+          ))}
         </div>
 
         <div style={{ width: 1, height: 18, background: TC.border }}/>
 
-        {/* Timeframe */}
+        {/* Timeframe pills */}
         <div style={{ display: 'flex', gap: 3 }}>
-          {TIMEFRAMES.map(tf => <button key={tf} onClick={() => setTimeframe(tf)} style={tfBtn(timeframe === tf)}>{tf}</button>)}
+          {TIMEFRAMES.map(tf => (
+            <button key={tf} onClick={() => setTimeframe(tf)} style={tfBtn(timeframe === tf)}>{tf}</button>
+          ))}
         </div>
 
         <div style={{ width: 1, height: 18, background: TC.border }}/>
 
-        {/* Sync controls */}
+        {/* Exchange selector */}
+        <select
+          value={exchange}
+          onChange={e => setExchange(e.target.value)}
+          style={{
+            padding: '4px 8px', background: TC.surface2, border: `1px solid ${TC.border}`,
+            borderRadius: 4, color: TC.textMid, fontFamily: TC.fontMono, fontSize: 11, cursor: 'pointer',
+          }}
+        >
+          {EXCHANGE_LIST.map(ex => <option key={ex} value={ex}>{ex}</option>)}
+        </select>
+
+        <div style={{ width: 1, height: 18, background: TC.border }}/>
+
+        {/* DB sync (for indicator calculations) */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <select
             value={syncDays}
             onChange={e => setSyncDays(Number(e.target.value))}
             style={{
               padding: '4px 8px', background: TC.surface2, border: `1px solid ${TC.border}`,
-              borderRadius: 4, color: TC.textMid, fontFamily: TC.fontMono, fontSize: 11, cursor: 'pointer',
+              borderRadius: 4, color: TC.textMuted, fontFamily: TC.fontMono, fontSize: 11, cursor: 'pointer',
             }}
           >
             {[7, 30, 90, 180, 365].map(d => <option key={d} value={d}>{d}d</option>)}
           </select>
           <button onClick={handleSync} disabled={syncing} style={{
             padding: '4px 14px', borderRadius: 5, cursor: syncing ? 'not-allowed' : 'pointer',
-            border: `1px solid ${TC.accent}`,
-            background: syncing ? TC.surface2 : TC.accentDim,
-            color: syncing ? TC.textMuted : TC.accent,
-            fontFamily: TC.fontMono, fontSize: 11, fontWeight: 700, transition: 'all 0.15s',
-          }}>
-            {syncing ? '⟳ Syncing…' : '⟳ Sync'}
+            border: `1px solid ${TC.border}`,
+            background: 'transparent',
+            color: syncing ? TC.textMuted : TC.textMid,
+            fontFamily: TC.fontMono, fontSize: 10, fontWeight: 700, transition: 'all 0.15s',
+          }} title="Sync OHLCV to local DB (used by indicator engine)">
+            {syncing ? '⟳ Syncing…' : '⟳ DB Sync'}
           </button>
-          {barCount !== null && (
-            <span style={{ color: TC.textMuted, fontSize: 10, fontFamily: TC.fontMono }}>
-              {barCount > 0 ? `${barCount} bars` : 'No data'}
-            </span>
-          )}
           {syncResult && (
             <span style={{ color: syncResult.startsWith('✓') ? TC.green : TC.red, fontSize: 10, fontFamily: TC.fontMono }}>
               {syncResult}
@@ -227,16 +265,8 @@ export default function ChartView() {
           )}
         </div>
 
-        {/* Live price + score */}
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 16 }}>
-          {livePrice !== null && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <div style={{ width: 6, height: 6, borderRadius: '50%', background: TC.green, boxShadow: `0 0 6px ${TC.green}`, animation: 'tcPulse 2s infinite' }}/>
-              <span style={{ fontFamily: TC.fontMono, fontSize: 15, fontWeight: 700, color: TC.text }}>
-                ${livePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </span>
-            </div>
-          )}
+        {/* Zone + score */}
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
           <TCBadge variant={zone === 'BUY' ? 'buy' : zone === 'SELL' ? 'sell' : 'neutral'}>{zone} ZONE</TCBadge>
           <span style={{
             color: zone === 'BUY' ? TC.green : zone === 'SELL' ? TC.red : TC.textMid,
@@ -247,28 +277,14 @@ export default function ChartView() {
         </div>
       </div>
 
-      {/* Chart area */}
-      <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
-        {barCount === 0 && (
-          <div style={{
-            position: 'absolute', inset: 0, zIndex: 10,
-            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-            background: TC.bg,
-          }}>
-            <div style={{ color: TC.textMuted, fontFamily: TC.fontMono, fontSize: 13, marginBottom: 16, textAlign: 'center' }}>
-              No OHLCV data for {symbol}<br/>
-              <span style={{ fontSize: 11, opacity: 0.6 }}>Click Sync to fetch from {EXCHANGE}</span>
-            </div>
-            <button onClick={handleSync} disabled={syncing} style={{
-              padding: '8px 24px', borderRadius: 6, cursor: 'pointer',
-              border: `1px solid ${TC.accent}`, background: TC.accentDim,
-              color: TC.accent, fontFamily: TC.fontMono, fontSize: 12, fontWeight: 700,
-            }}>
-              {syncing ? '⟳ Syncing…' : `⟳ Fetch ${syncDays} days`}
-            </button>
-          </div>
-        )}
-        <div ref={containerRef} style={{ width: '100%', height: '100%' }}/>
+      {/* TradingView chart — live data straight from exchange */}
+      <div style={{ flex: 1, minHeight: 400, position: 'relative', background: TC.bg }}>
+        <TradingViewChart
+          symbol={symbol}
+          exchange={exchange}
+          timeframe={timeframe}
+          containerId={chartId}
+        />
       </div>
 
       {/* Indicator panel */}
