@@ -253,6 +253,22 @@ export const TCIcons = {
       <circle cx="7" cy="11" r="0.7" fill="currentColor"/>
     </svg>
   ),
+  News: () => (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+      <rect x="1.5" y="2" width="13" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.4"/>
+      <line x1="4" y1="5.5" x2="12" y2="5.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+      <line x1="4" y1="8" x2="12" y2="8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+      <line x1="4" y1="10.5" x2="9" y2="10.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+    </svg>
+  ),
+  Social: () => (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+      <circle cx="8" cy="6" r="2.5" stroke="currentColor" strokeWidth="1.4"/>
+      <circle cx="2.5" cy="11" r="1.8" stroke="currentColor" strokeWidth="1.3"/>
+      <circle cx="13.5" cy="11" r="1.8" stroke="currentColor" strokeWidth="1.3"/>
+      <path d="M5.5 13.5C5.5 11.5 10.5 11.5 10.5 13.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+    </svg>
+  ),
 }
 
 // ── Mode Toggle ─────────────────────────────────────────────────────────────
@@ -382,11 +398,13 @@ export const TCNavbar = ({ mode, onModeChange, killSwitch, setKillSwitch, wsOk, 
 
 // ── Sidebar ─────────────────────────────────────────────────────────────────
 const NAV_ITEMS = [
-  { id: '/',         label: 'Dashboard',       Icon: TCIcons.Dashboard },
-  { id: '/chart',    label: 'Chart View',       Icon: TCIcons.Chart     },
-  { id: '/strategy', label: 'Strategy Builder', Icon: TCIcons.Strategy  },
-  { id: '/backtest', label: 'Backtest',          Icon: TCIcons.Backtest  },
-  { id: '/signals',  label: 'Signal Monitor',   Icon: TCIcons.Signals   },
+  { id: '/',         label: 'Dashboard',        Icon: TCIcons.Dashboard },
+  { id: '/chart',    label: 'Chart View',        Icon: TCIcons.Chart     },
+  { id: '/strategy', label: 'Strategy Builder',  Icon: TCIcons.Strategy  },
+  { id: '/backtest', label: 'Backtest',           Icon: TCIcons.Backtest  },
+  { id: '/signals',  label: 'Signal Monitor',    Icon: TCIcons.Signals   },
+  { id: '/news',     label: 'News',              Icon: TCIcons.News      },
+  { id: '/social',   label: 'Social',            Icon: TCIcons.Social    },
 ]
 
 export const TCSidebar = ({ activePath, navigate }: { activePath: string; navigate: (p: string) => void }) => (

@@ -50,6 +50,24 @@ export const api = {
   // Backtest
   runBacktest: (body: BacktestRequest) =>
     req<BacktestResult>('/backtest/run', { method: 'POST', body: JSON.stringify(body) }),
+
+  // Watchlist
+  getWatchlist: () => req<WatchedSymbol[]>('/watchlist'),
+  addWatchedSymbol: (symbol: string, exchange: string, asset_type: string) =>
+    req<WatchedSymbol>('/watchlist', { method: 'POST', body: JSON.stringify({ symbol, exchange, asset_type }) }),
+  removeWatchedSymbol: (id: string) =>
+    req(`/watchlist/${id}`, { method: 'DELETE' }),
+
+  // News
+  getNews: (symbols?: string[], limit = 50) => {
+    const params = new URLSearchParams({ limit: String(limit) })
+    if (symbols?.length) params.set('symbols', symbols.join(','))
+    return req<NewsArticle[]>(`/news?${params}`)
+  },
+
+  // Social
+  getSocial: (source: 'reddit' | 'twitter' | 'rss', category = 'crypto', query = 'bitcoin OR crypto', limit = 30) =>
+    req<SocialPost[]>(`/social?source=${source}&category=${category}&query=${encodeURIComponent(query)}&limit=${limit}`),
 }
 
 // Types
@@ -119,4 +137,30 @@ export interface BacktestTrade {
   price: number
   quantity: number
   pnl: number | null
+}
+
+export interface WatchedSymbol {
+  id: string
+  symbol: string
+  exchange: string
+  asset_type: string
+  added_at: string | null
+}
+
+export interface NewsArticle {
+  title: string
+  source: string
+  published_at: string | null
+  url: string | null
+  summary: string
+}
+
+export interface SocialPost {
+  title: string
+  source: string
+  url: string | null
+  score: number
+  comments: number
+  published_at: string | null
+  platform: string
 }

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import structlog
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import select
@@ -198,41 +200,30 @@ async def run_trading_cycle() -> None:
         log.error("trading_cycle.error", error=str(exc))
 
 
-async def broadcast_price_ticks() -> None:
-    """Broadcast latest 1m candle for active strategy symbol → 'prices' WS channel."""
-    from app.services.exchange_client import get_exchange_client
-    from app.ws.manager import ws_manager
+async def cleanup_old_ohlcv() -> None:
+    """Daily job: delete OHLCV rows older than 1 year."""
+    from datetime import timedelta
 
-    if ws_manager.connection_count("prices") == 0:
-        return  # no clients, skip exchange call
+    from sqlalchemy import delete
 
-    strategy = app_state.active_strategy
-    if not strategy:
-        return
+    from app.db.models import OHLCV
+    from app.db.session import AsyncSessionLocal
 
-    symbol: str = strategy.get("symbol", "")
-    exchange: str = strategy.get("exchange", "")
-    if not symbol:
-        return
-
+    cutoff = datetime.now(timezone.utc) - timedelta(days=365)
     try:
-        client = get_exchange_client()
-        bars = await client.fetch_ohlcv(symbol, "1m", limit=1)
-        if bars:
-            bar = bars[0]
-            await ws_manager.broadcast("prices", {
-                "type": "tick",
-                "symbol": symbol,
-                "exchange": exchange,
-                "time": bar[0] // 1000,   # ms → s
-                "open":   bar[1],
-                "high":   bar[2],
-                "low":    bar[3],
-                "close":  bar[4],
-                "volume": bar[5],
-            })
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(delete(OHLCV).where(OHLCV.time < cutoff))
+            await db.commit()
+            log.info("ohlcv.cleanup", deleted_rows=result.rowcount)
     except Exception as exc:
-        log.warning("price_tick.error", error=str(exc))
+        log.error("ohlcv.cleanup_error", error=str(exc))
+
+
+async def poll_stock_prices_job() -> None:
+    """60s job: poll yfinance prices for non-crypto watched symbols."""
+    from app.services.stock_feed import poll_stock_prices
+
+    await poll_stock_prices()
 
 
 def setup_scheduler(scheduler: AsyncIOScheduler) -> None:
@@ -250,14 +241,23 @@ def setup_scheduler(scheduler: AsyncIOScheduler) -> None:
         misfire_grace_time=30,
     )
 
-    # Fast price tick — every 10s, only costs one REST call when clients are connected
     scheduler.add_job(
-        broadcast_price_ticks,
-        trigger="interval",
-        seconds=10,
-        id="price_ticks",
+        cleanup_old_ohlcv,
+        trigger="cron",
+        hour=2,
+        minute=0,
+        id="ohlcv_cleanup",
         replace_existing=True,
-        misfire_grace_time=5,
+        misfire_grace_time=300,
+    )
+
+    scheduler.add_job(
+        poll_stock_prices_job,
+        trigger="interval",
+        seconds=60,
+        id="stock_prices",
+        replace_existing=True,
+        misfire_grace_time=30,
     )
 
     log.info("scheduler.job_registered", cadence_seconds=cadence)

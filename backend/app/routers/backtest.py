@@ -22,6 +22,73 @@ class BacktestRequest(BaseModel):
     strategy_config: dict | None = None  # uses active strategy if None
 
 
+async def _prefetch_if_needed(
+    symbol: str,
+    exchange: str,
+    timeframe: str,
+    db: AsyncSession,
+    min_bars: int = 31,
+) -> int:
+    """
+    Check if we have enough data. If not, fetch from exchange/yfinance and store.
+    Returns the count of available rows after potential prefetch.
+    """
+    import structlog
+    log = structlog.get_logger()
+
+    count = (
+        await db.execute(
+            select(OHLCV).where(OHLCV.symbol == symbol, OHLCV.exchange == exchange)
+        )
+    ).scalars().all()
+
+    if len(count) >= min_bars:
+        return len(count)
+
+    log.info("backtest.prefetch_start", symbol=symbol, exchange=exchange, have=len(count))
+
+    # Determine asset type from watched symbols
+    watched = {s["symbol"]: s for s in app_state.watched_symbols}
+    sym_info = watched.get(symbol, {})
+    asset_type = sym_info.get("asset_type", "crypto")
+
+    if asset_type == "crypto":
+        # Use CCXT / Binance history
+        try:
+            from datetime import timedelta
+            from app.services.data_ingestion import fetch_ohlcv, upsert_ohlcv
+            since = datetime.now(timezone.utc) - timedelta(days=365)
+            rows = await fetch_ohlcv(symbol, exchange, timeframe, since=since)
+            if rows:
+                await upsert_ohlcv(rows, db)
+                log.info("backtest.prefetch_done", symbol=symbol, upserted=len(rows))
+                return len(rows)
+        except Exception as exc:
+            log.warning("backtest.prefetch_crypto_error", error=str(exc))
+    else:
+        # Use yfinance
+        try:
+            from app.services.stock_feed import fetch_yfinance_history
+            from app.services.data_ingestion import OHLCVRow, upsert_ohlcv
+            bars = await fetch_yfinance_history(symbol, asset_type, period="1y", interval="1d")
+            if bars:
+                ohlcv_rows = [
+                    OHLCVRow(
+                        time=b["time"], symbol=symbol, exchange=exchange,
+                        open=b["open"], high=b["high"], low=b["low"],
+                        close=b["close"], volume=b["volume"],
+                    )
+                    for b in bars
+                ]
+                await upsert_ohlcv(ohlcv_rows, db)
+                log.info("backtest.prefetch_done", symbol=symbol, upserted=len(ohlcv_rows))
+                return len(ohlcv_rows)
+        except Exception as exc:
+            log.warning("backtest.prefetch_stock_error", error=str(exc))
+
+    return len(count)
+
+
 @router.post("/run")
 async def run_backtest_endpoint(
     body: BacktestRequest,
@@ -32,6 +99,9 @@ async def run_backtest_endpoint(
         if app_state.active_strategy is None:
             raise HTTPException(status_code=400, detail="No active strategy and no strategy_config provided")
         strategy_config = app_state.active_strategy
+
+    # Auto-fetch historical data if insufficient
+    await _prefetch_if_needed(body.symbol, body.exchange, body.timeframe, db)
 
     rows = (
         await db.execute(
@@ -44,7 +114,8 @@ async def run_backtest_endpoint(
     if len(rows) < 31:
         raise HTTPException(
             status_code=422,
-            detail=f"Insufficient OHLCV data: need at least 31 bars, got {len(rows)}",
+            detail=f"Insufficient OHLCV data: need at least 31 bars, got {len(rows)}. "
+                   f"Try syncing data first via /market/sync.",
         )
 
     df = pd.DataFrame(

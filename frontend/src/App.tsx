@@ -9,6 +9,8 @@ import ChartView from './pages/ChartView'
 import StrategyBuilder from './pages/StrategyBuilder'
 import Backtest from './pages/Backtest'
 import SignalMonitor from './pages/SignalMonitor'
+import News from './pages/News'
+import Social from './pages/Social'
 
 function AppShell() {
   const { killSwitch, tradingMode, wsStatus, setKillSwitch, setTradingMode, setActiveStrategy, activeStrategy } = useStore()
@@ -75,6 +77,8 @@ function AppShell() {
             <Route path="/strategy" element={<StrategyBuilder/>}/>
             <Route path="/backtest" element={<Backtest/>}/>
             <Route path="/signals"  element={<SignalMonitor/>}/>
+            <Route path="/news"    element={<News/>}/>
+            <Route path="/social"  element={<Social/>}/>
           </Routes>
         </main>
       </div>

@@ -9,6 +9,7 @@ from sqlalchemy import (
     Double,
     Integer,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -140,5 +141,21 @@ class Controls(Base):
     kill_switch: Mapped[bool | None] = mapped_column(Boolean, server_default="FALSE")
     trading_mode: Mapped[str | None] = mapped_column(Text, server_default="'paper'")
     updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default="NOW()"
+    )
+
+
+class WatchedSymbol(Base):
+    __tablename__ = "watched_symbols"
+    __table_args__ = (UniqueConstraint("symbol", "exchange"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    symbol: Mapped[str] = mapped_column(Text, nullable=False)
+    exchange: Mapped[str] = mapped_column(Text, nullable=False)
+    asset_type: Mapped[str] = mapped_column(Text, nullable=False)  # crypto | us_stock | indian_stock
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="TRUE")
+    added_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default="NOW()"
     )
