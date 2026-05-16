@@ -1,100 +1,212 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { api, WatchedSymbol } from '../api'
 import { TC } from '../theme'
-import { TCBadge, TCSectionHeader } from '../components/ui'
+import { TCSectionHeader } from '../components/ui'
+import { createChart, ColorType, CrosshairMode } from 'lightweight-charts'
+import type { IChartApi } from 'lightweight-charts'
 
-// ── TradingView helpers ────────────────────────────────────────────────────
-const TV_EXCHANGE_MAP: Record<string, string> = {
-  binanceus:  'BINANCEUS',
-  binance:    'BINANCE',
-  coinbase:   'COINBASE',
-  kraken:     'KRAKEN',
-  bybit:      'BYBIT',
-  yfinance_us:  'NASDAQ',
-  yfinance_in:  'NSE',
+// ── Lightweight Charts component ───────────────────────────────────────────
+
+const TIMEFRAMES = ['1m', '5m', '15m', '1h', '4h', '1d']
+
+interface OHLCVBar {
+  time: string
+  open: number
+  high: number
+  low: number
+  close: number
+  volume: number
 }
 
-const toTvSymbol = (symbol: string, exchange: string): string => {
-  const pair = symbol.replace('/', '')
-  const ex = TV_EXCHANGE_MAP[exchange.toLowerCase()] ?? exchange.toUpperCase()
-  return `${ex}:${pair}`
+// Simple bar type (avoids lightweight-charts branded UTCTimestamp complexity)
+interface Bar {
+  time: number
+  open: number
+  high: number
+  low: number
+  close: number
 }
 
-// ── TradingView widget ────────────────────────────────────────────────────
-interface TVWidgetInstance {
-  setSymbol: (s: string, interval: string, cb: () => void) => void
-}
-
-declare global {
-  interface Window {
-    TradingView?: { widget: new (config: Record<string, unknown>) => TVWidgetInstance }
-  }
-}
-
-let tvScriptLoaded = false
-let tvScriptCallbacks: Array<() => void> = []
-
-function loadTvScript(cb: () => void) {
-  if (tvScriptLoaded) { cb(); return }
-  tvScriptCallbacks.push(cb)
-  if (tvScriptCallbacks.length > 1) return
-  const s = document.createElement('script')
-  s.src = 'https://s3.tradingview.com/tv.js'
-  s.async = true
-  s.onload = () => { tvScriptLoaded = true; tvScriptCallbacks.forEach(f => f()); tvScriptCallbacks = [] }
-  document.head.appendChild(s)
-}
-
-interface TVChartProps {
+interface LWChartProps {
   symbol: string
   exchange: string
-  containerId: string
-  widgetRef: React.MutableRefObject<TVWidgetInstance | null>
+  timeframe: string
+  onPriceUpdate?: (price: number) => void
 }
 
-function TradingViewChart({ symbol, exchange, containerId, widgetRef }: TVChartProps) {
+function LightweightChart({ symbol, exchange, timeframe, onPriceUpdate }: LWChartProps) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const chartRef     = useRef<IChartApi | null>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const seriesRef    = useRef<any>(null)
+  const pendingRef   = useRef<Bar | null>(null)
+  const [noData, setNoData] = useState(false)
+
+  // Create chart once on mount
   useEffect(() => {
-    const tvSym = toTvSymbol(symbol, exchange)
+    if (!containerRef.current) return
 
-    loadTvScript(() => {
-      if (!window.TradingView) return
-      const el = document.getElementById(containerId)
-      if (el) el.innerHTML = ''
-
-      widgetRef.current = new window.TradingView.widget({
-        container_id:        containerId,
-        autosize:            true,
-        symbol:              tvSym,
-        interval:            '15',
-        timezone:            'Etc/UTC',
-        theme:               'dark',
-        style:               '1',
-        locale:              'en',
-        toolbar_bg:          TC.surface,
-        backgroundColor:     TC.bg,
-        enable_publishing:   false,
-        withdateranges:      true,
-        hide_top_toolbar:    false,
-        allow_symbol_change: true,
-        save_image:          false,
-        hide_side_toolbar:   false,
-        studies:             [],
-        overrides: {
-          'mainSeriesProperties.candleStyle.upColor':         TC.green,
-          'mainSeriesProperties.candleStyle.downColor':       TC.red,
-          'mainSeriesProperties.candleStyle.borderUpColor':   TC.green,
-          'mainSeriesProperties.candleStyle.borderDownColor': TC.red,
-          'mainSeriesProperties.candleStyle.wickUpColor':     TC.green,
-          'mainSeriesProperties.candleStyle.wickDownColor':   TC.red,
-          'paneProperties.background':                        TC.bg,
-          'paneProperties.backgroundType':                    'solid',
-          'scalesProperties.textColor':                       TC.textMuted,
-        },
-      }) as TVWidgetInstance
+    const chart = createChart(containerRef.current, {
+      layout: {
+        background: { type: ColorType.Solid, color: TC.bg },
+        textColor: TC.textMuted,
+        fontFamily: TC.fontMono,
+        fontSize: 10,
+      },
+      grid: {
+        vertLines: { color: 'rgba(255,255,255,0.03)' },
+        horzLines: { color: 'rgba(255,255,255,0.03)' },
+      },
+      crosshair: { mode: CrosshairMode.Normal },
+      rightPriceScale: { borderColor: TC.border },
+      timeScale: {
+        borderColor: TC.border,
+        timeVisible: true,
+        secondsVisible: timeframe === '1m',
+      },
+      width:  containerRef.current.clientWidth,
+      height: containerRef.current.clientHeight,
     })
-  }, [symbol, exchange, containerId])
 
-  return <div id={containerId} style={{ width: '100%', height: '100%', minHeight: 450 }}/>
+    const series = chart.addCandlestickSeries({
+      upColor:         TC.green,
+      downColor:       TC.red,
+      borderUpColor:   TC.green,
+      borderDownColor: TC.red,
+      wickUpColor:     TC.green,
+      wickDownColor:   TC.red,
+    })
+
+    chartRef.current  = chart
+    seriesRef.current = series
+
+    const ro = new ResizeObserver(entries => {
+      const { width, height } = entries[0].contentRect
+      chart.applyOptions({ width, height })
+    })
+    ro.observe(containerRef.current)
+
+    return () => {
+      ro.disconnect()
+      chart.remove()
+      chartRef.current  = null
+      seriesRef.current = null
+    }
+  }, [])
+
+  // Update secondsVisible when timeframe changes
+  useEffect(() => {
+    chartRef.current?.applyOptions({
+      timeScale: { secondsVisible: timeframe === '1m' },
+    })
+  }, [timeframe])
+
+  // Load history + start live WS whenever symbol / exchange / timeframe changes
+  useEffect(() => {
+    const series = seriesRef.current
+    if (!series) return
+
+    let dead = false
+    let ws: WebSocket | null = null
+
+    const loadHistory = async () => {
+      setNoData(false)
+      try {
+        const params = new URLSearchParams({ symbol, exchange, timeframe, limit: '500' })
+        const res    = await fetch(`/api/market/ohlcv?${params}`)
+        if (!res.ok) throw new Error('fetch failed')
+        const bars: OHLCVBar[] = await res.json()
+        if (!bars.length) { setNoData(true); return }
+
+        const data: Bar[] = bars
+          .map(b => ({
+            time:  Math.floor(new Date(b.time).getTime() / 1000),
+            open:  Number(b.open),
+            high:  Number(b.high),
+            low:   Number(b.low),
+            close: Number(b.close),
+          }))
+          .sort((a, b) => a.time - b.time)
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        series.setData(data as any)
+        chartRef.current?.timeScale().fitContent()
+        if (data.length && onPriceUpdate) {
+          onPriceUpdate(data[data.length - 1].close)
+        }
+      } catch {
+        setNoData(true)
+      }
+    }
+
+    loadHistory()
+
+    // Connect backend WS for live kline ticks from Binance US
+    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
+
+    function connectWs() {
+      if (dead) return
+      try {
+        ws = new WebSocket(`${proto}://${window.location.host}/ws/prices`)
+        ws.onmessage = (e) => {
+          try {
+            const msg = JSON.parse(e.data)
+            if (msg.type === 'tick' && msg.symbol === symbol) {
+              pendingRef.current = {
+                time:  Number(msg.time),
+                open:  Number(msg.open),
+                high:  Number(msg.high),
+                low:   Number(msg.low),
+                close: Number(msg.close),
+              }
+            }
+          } catch { /* ignore */ }
+        }
+        ws.onclose = () => { if (!dead) setTimeout(connectWs, 3000) }
+        ws.onerror = () => ws?.close()
+      } catch { /* ignore */ }
+    }
+
+    connectWs()
+
+    // Sample at 100 ms — apply buffered bar without causing React re-renders
+    const timer = setInterval(() => {
+      const bar = pendingRef.current
+      if (bar && seriesRef.current) {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          seriesRef.current.update(bar as any)
+          if (onPriceUpdate) onPriceUpdate(bar.close)
+        } catch { /* stale bar from previous symbol */ }
+        pendingRef.current = null
+      }
+    }, 100)
+
+    return () => {
+      dead = true
+      ws?.close()
+      clearInterval(timer)
+      pendingRef.current = null
+    }
+  }, [symbol, exchange, timeframe])
+
+  return (
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
+      {noData && (
+        <div style={{
+          position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center', gap: 10,
+          color: TC.textMuted, fontFamily: TC.fontMono, fontSize: 12,
+          background: 'rgba(0,0,0,0.5)',
+          pointerEvents: 'none',
+        }}>
+          <span>No data for {symbol} / {timeframe}</span>
+          <span style={{ fontSize: 10, opacity: 0.6 }}>Use ⟳ DB Sync to fetch historical bars</span>
+        </div>
+      )}
+    </div>
+  )
 }
 
 // ── Live trades panel ─────────────────────────────────────────────────────
@@ -107,13 +219,11 @@ interface LiveTrade {
 
 function useLiveTrades(symbol: string): LiveTrade[] {
   const [trades, setTrades] = useState<LiveTrade[]>([])
-  const wsRef = useRef<WebSocket | null>(null)
 
   useEffect(() => {
     if (!symbol) return
-    // Strip exchange prefix and convert to binance stream format
     const base = symbol.replace('/', '').toLowerCase()
-    const url = `wss://stream.binance.us:9443/stream?streams=${base}@trade`
+    const url  = `wss://stream.binance.us:9443/stream?streams=${base}@trade`
 
     let ws: WebSocket
     let dead = false
@@ -122,16 +232,15 @@ function useLiveTrades(symbol: string): LiveTrade[] {
       if (dead) return
       try {
         ws = new WebSocket(url)
-        wsRef.current = ws
         ws.onmessage = (e) => {
           try {
             const msg = JSON.parse(e.data)
-            const t = msg.data || msg
+            const t   = msg.data || msg
             setTrades(prev => [{
-              price: parseFloat(t.p),
-              qty: parseFloat(t.q),
+              price:        parseFloat(t.p),
+              qty:          parseFloat(t.q),
               isBuyerMaker: t.m,
-              time: Math.floor(t.T / 1000),
+              time:         Math.floor(t.T / 1000),
             }, ...prev].slice(0, 50))
           } catch { /* ignore */ }
         }
@@ -169,7 +278,7 @@ function LiveTradesPanel({ symbol }: { symbol: string }) {
           </div>
         )}
         {trades.map((t, i) => {
-          const col = t.isBuyerMaker ? TC.red : TC.green
+          const col  = t.isBuyerMaker ? TC.red : TC.green
           const time = new Date(t.time * 1000).toTimeString().slice(0, 8)
           return (
             <div key={i} style={{
@@ -201,14 +310,14 @@ interface AddSymbolModalProps {
 }
 
 function AddSymbolModal({ onAdd, onClose }: AddSymbolModalProps) {
-  const [symbol, setSymbol] = useState('')
+  const [symbol, setSymbol]     = useState('')
   const [exchange, setExchange] = useState('binanceus')
   const [assetType, setAssetType] = useState('crypto')
 
   const EXCHANGE_DEFAULTS: Record<string, string> = {
-    crypto:        'binanceus',
-    us_stock:      'yfinance_us',
-    indian_stock:  'yfinance_in',
+    crypto:       'binanceus',
+    us_stock:     'yfinance_us',
+    indian_stock: 'yfinance_in',
   }
 
   const handleAssetChange = (t: string) => {
@@ -284,7 +393,7 @@ function TrackedSymbolsPanel({
               </div>
               {items.map(sym => {
                 const isActive = selected === sym.symbol
-                const price = latestPrices[sym.symbol]
+                const price    = latestPrices[sym.symbol]
                 return (
                   <div key={sym.id} style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -313,7 +422,7 @@ function TrackedSymbolsPanel({
         })}
         {symbols.length === 0 && (
           <div style={{ padding: '20px 10px', color: TC.textMuted, fontSize: 10, fontFamily: TC.fontMono, textAlign: 'center' }}>
-            No symbols tracked.<br/>Click + to add.
+            No symbols tracked.<br />Click + to add.
           </div>
         )}
       </div>
@@ -332,7 +441,7 @@ const INDICATORS = [
 ]
 
 function IndicatorBar({ label, value, weight }: { label: string; value: number; weight: number }) {
-  const col = value > 0.3 ? TC.green : value < -0.3 ? TC.red : TC.textMid
+  const col    = value > 0.3 ? TC.green : value < -0.3 ? TC.red : TC.textMid
   const contrib = (value * weight).toFixed(4)
   const pctHalf = Math.min(Math.abs(value), 1) * 50
   return (
@@ -362,17 +471,17 @@ function IndicatorBar({ label, value, weight }: { label: string; value: number; 
 
 // ── Main Page ─────────────────────────────────────────────────────────────
 export default function ChartView() {
-  const [watchlist, setWatchlist]   = useState<WatchedSymbol[]>([])
-  const [selected, setSelected]     = useState<WatchedSymbol | null>(null)
-  const [syncing, setSyncing]       = useState(false)
-  const [syncDays, setSyncDays]     = useState(90)
-  const [syncResult, setSyncResult] = useState<string | null>(null)
+  const [watchlist, setWatchlist]       = useState<WatchedSymbol[]>([])
+  const [selected, setSelected]         = useState<WatchedSymbol | null>(null)
+  const [timeframe, setTimeframe]       = useState('1m')
+  const [livePrice, setLivePrice]       = useState<number | null>(null)
+  const [syncing, setSyncing]           = useState(false)
+  const [syncDays, setSyncDays]         = useState(90)
+  const [syncResult, setSyncResult]     = useState<string | null>(null)
   const [showAddModal, setShowAddModal] = useState(false)
   const [latestPrices, setLatestPrices] = useState<Record<string, number>>({})
-  const widgetRef = useRef<TVWidgetInstance | null>(null)
-  const chartId   = useRef(`tv_${Math.random().toString(36).slice(2)}`).current
 
-  // Load watchlist
+  // Load watchlist on mount
   useEffect(() => {
     api.getWatchlist().then(rows => {
       setWatchlist(rows)
@@ -380,10 +489,10 @@ export default function ChartView() {
     }).catch(() => {})
   }, [])
 
-  // Subscribe to /ws/prices for live price updates in the sidebar
+  // Subscribe to /ws/prices for sidebar price badges (all symbols)
   useEffect(() => {
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    const ws = new WebSocket(`${proto}://${window.location.host}/ws/prices`)
+    const ws    = new WebSocket(`${proto}://${window.location.host}/ws/prices`)
     ws.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data)
@@ -397,7 +506,7 @@ export default function ChartView() {
 
   const handleSelect = useCallback((sym: WatchedSymbol) => {
     setSelected(sym)
-    // If TV widget supports setSymbol, use it; otherwise the chart re-renders via key prop
+    setLivePrice(null)
   }, [])
 
   const handleAdd = async (symbol: string, exchange: string, assetType: string) => {
@@ -405,6 +514,7 @@ export default function ChartView() {
       const row = await api.addWatchedSymbol(symbol, exchange, assetType)
       setWatchlist(prev => [...prev, row])
       setSelected(row)
+      setLivePrice(null)
     } catch (e: unknown) {
       alert(e instanceof Error ? e.message : 'Failed to add symbol')
     }
@@ -416,6 +526,7 @@ export default function ChartView() {
     if (selected?.id === id) {
       const remaining = watchlist.filter(s => s.id !== id)
       setSelected(remaining[0] ?? null)
+      setLivePrice(null)
     }
   }
 
@@ -424,7 +535,7 @@ export default function ChartView() {
     setSyncing(true)
     setSyncResult(null)
     try {
-      const res = await api.syncMarket(selected.symbol, selected.exchange, '1h', syncDays)
+      const res = await api.syncMarket(selected.symbol, selected.exchange, timeframe, syncDays)
       setSyncResult(`✓ ${res.upserted} bars stored`)
     } catch (e: unknown) {
       setSyncResult(`✗ ${e instanceof Error ? e.message : 'Sync failed'}`)
@@ -432,20 +543,53 @@ export default function ChartView() {
     setSyncing(false)
   }
 
+  const handlePriceUpdate = useCallback((price: number) => {
+    setLivePrice(price)
+  }, [])
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
 
-      {/* Thin top bar: sync controls only */}
+      {/* Top bar: symbol + live price + timeframe selector + DB sync */}
       <div style={{
-        padding: '6px 14px', borderBottom: `1px solid ${TC.border}`,
+        padding: '5px 14px', borderBottom: `1px solid ${TC.border}`,
         display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0,
         background: TC.surface,
       }}>
+        {/* Symbol + live price */}
         {selected && (
-          <span style={{ color: TC.accent, fontFamily: TC.fontMono, fontSize: 12, fontWeight: 700, marginRight: 6 }}>
-            {selected.symbol}
-          </span>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginRight: 6 }}>
+            <span style={{ color: TC.accent, fontFamily: TC.fontMono, fontSize: 12, fontWeight: 700 }}>
+              {selected.symbol}
+            </span>
+            {livePrice != null && (
+              <span style={{ color: TC.text, fontFamily: TC.fontMono, fontSize: 16, fontWeight: 700, letterSpacing: '-0.02em' }}>
+                ${livePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
+            )}
+          </div>
         )}
+
+        {/* Separator */}
+        <div style={{ width: 1, height: 18, background: TC.border, marginRight: 4 }} />
+
+        {/* Timeframe pills */}
+        <div style={{ display: 'flex', gap: 3 }}>
+          {TIMEFRAMES.map(tf => (
+            <button key={tf} onClick={() => setTimeframe(tf)} style={{
+              padding: '2px 8px', borderRadius: 4, cursor: 'pointer', fontFamily: TC.fontMono, fontSize: 10, fontWeight: 600,
+              background: timeframe === tf ? TC.accentDim : 'transparent',
+              border: `1px solid ${timeframe === tf ? TC.accent : TC.border}`,
+              color: timeframe === tf ? TC.accent : TC.textMuted,
+              transition: 'all 0.1s',
+            }}>{tf}</button>
+          ))}
+        </div>
+
+        {/* Separator */}
+        <div style={{ width: 1, height: 18, background: TC.border, margin: '0 4px' }} />
+
+        {/* DB Sync */}
         <select value={syncDays} onChange={e => setSyncDays(Number(e.target.value))}
           style={{ padding: '3px 6px', background: TC.surface2, border: `1px solid ${TC.border}`, borderRadius: 4, color: TC.textMuted, fontFamily: TC.fontMono, fontSize: 11, cursor: 'pointer' }}>
           {[7, 30, 90, 180, 365].map(d => <option key={d} value={d}>{d}d</option>)}
@@ -462,8 +606,9 @@ export default function ChartView() {
             {syncResult}
           </span>
         )}
-        <div style={{ marginLeft: 'auto', color: TC.textMuted, fontSize: 9.5, fontFamily: TC.fontMono }}>
-          Live data via TradingView · DB Sync feeds indicator engine
+
+        <div style={{ marginLeft: 'auto', color: TC.textMuted, fontSize: 9, fontFamily: TC.fontMono, opacity: 0.7 }}>
+          Binance US live · 100ms sampling
         </div>
       </div>
 
@@ -482,15 +627,15 @@ export default function ChartView() {
           />
         </div>
 
-        {/* Center: TradingView chart */}
-        <div style={{ flex: 1, minWidth: 0, background: TC.bg }}>
+        {/* Center: Lightweight Chart */}
+        <div style={{ flex: 1, minWidth: 0, background: TC.bg, overflow: 'hidden' }}>
           {selected ? (
-            <TradingViewChart
-              key={selected.symbol + selected.exchange}
+            <LightweightChart
+              key={selected.symbol + '|' + selected.exchange}
               symbol={selected.symbol}
               exchange={selected.exchange}
-              containerId={chartId}
-              widgetRef={widgetRef}
+              timeframe={timeframe}
+              onPriceUpdate={handlePriceUpdate}
             />
           ) : (
             <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: TC.textMuted, fontFamily: TC.fontMono, fontSize: 12 }}>
