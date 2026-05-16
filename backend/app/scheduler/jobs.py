@@ -65,18 +65,40 @@ async def _count_open_positions(symbol: str, exchange: str, mode: str, db) -> in
     return len(rows)
 
 
+_SHORT_TO_FULL = {
+    "macd":    "macd_hist",
+    "bb":      "bb_position",
+    "ema":     "ema_cross",
+    "volume":  "volume_surge",
+}
+
+
 def _build_indicator_config(strategy: dict):
     from app.services.indicator_engine import IndicatorConfig, IndicatorDef
 
     tech_names = {"rsi", "macd_hist", "bb_position", "volume_surge", "ema_cross"}
-    indicators_cfg = strategy.get("indicators", {})
     defs = []
-    for name, cfg in indicators_cfg.items():
-        if name not in tech_names:
-            continue
-        weight = float(cfg.get("weight", 0.0)) if isinstance(cfg, dict) else 0.0
-        params = {k: v for k, v in (cfg.items() if isinstance(cfg, dict) else {}.items()) if k not in ("weight", "cache_ttl_minutes")}
-        defs.append(IndicatorDef(name=name, weight=weight, params=params))
+
+    # Support both formats:
+    #   new: strategy["indicators"] = {name: {weight: ..., ...params}}
+    #   legacy (StrategyBuilder): strategy["weights"] = {short_name: float}
+    indicators_cfg = strategy.get("indicators")
+    if indicators_cfg:
+        for name, cfg in indicators_cfg.items():
+            full_name = _SHORT_TO_FULL.get(name, name)
+            if full_name not in tech_names:
+                continue
+            weight = float(cfg.get("weight", 0.0)) if isinstance(cfg, dict) else 0.0
+            params = {k: v for k, v in (cfg.items() if isinstance(cfg, dict) else {}.items()) if k not in ("weight", "cache_ttl_minutes")}
+            defs.append(IndicatorDef(name=full_name, weight=weight, params=params))
+    else:
+        # Legacy flat weights dict from StrategyBuilder
+        weights_cfg = strategy.get("weights", {})
+        for name, weight in weights_cfg.items():
+            full_name = _SHORT_TO_FULL.get(name, name)
+            if full_name not in tech_names:
+                continue
+            defs.append(IndicatorDef(name=full_name, weight=float(weight), params={}))
     return IndicatorConfig(indicators=defs)
 
 

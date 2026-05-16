@@ -9,7 +9,7 @@ const INDICATOR_LABELS: Record<string, string> = {
 }
 
 const DEFAULT_CONFIG = {
-  symbol: 'BTC/USDT', exchange: 'binance', timeframe: '15m',
+  symbol: 'BTC/USDT', exchange: 'binanceus', timeframe: '15m',
   weights: { rsi: 0.25, macd: 0.20, bb: 0.15, ema: 0.20, volume: 0.10, sentiment: 0.10 },
   buy_threshold: 0.30, sell_threshold: 0.30,
   usdt_amount: 500, max_positions: 3, max_daily_loss: 150,
