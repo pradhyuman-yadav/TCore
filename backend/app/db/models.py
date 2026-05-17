@@ -25,6 +25,7 @@ class OHLCV(Base):
     time: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
     symbol: Mapped[str] = mapped_column(Text, primary_key=True)
     exchange: Mapped[str] = mapped_column(Text, primary_key=True)
+    timeframe: Mapped[str] = mapped_column(Text, primary_key=True, server_default="1m")
     open: Mapped[float | None] = mapped_column(Double)
     high: Mapped[float | None] = mapped_column(Double)
     low: Mapped[float | None] = mapped_column(Double)

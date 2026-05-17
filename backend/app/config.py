@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     db_name: str
 
     db_port: int = 5432
-    ccxt_exchange: str = "binance"
+    ccxt_exchange: str = "binanceus"
     ccxt_api_key: str = ""
     ccxt_secret: str = ""
     ntfy_url: str = ""

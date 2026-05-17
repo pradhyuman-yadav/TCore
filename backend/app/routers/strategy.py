@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -53,7 +53,7 @@ async def create_strategy(body: StrategyCreate, db: AsyncSession = Depends(get_d
 
 
 @router.post("/{strategy_id}/activate")
-async def activate_strategy(strategy_id: UUID, db: AsyncSession = Depends(get_db)):
+async def activate_strategy(strategy_id: UUID, request: Request, db: AsyncSession = Depends(get_db)):
     # Deactivate all
     rows = (await db.execute(select(Strategy))).scalars().all()
     for row in rows:
@@ -69,4 +69,15 @@ async def activate_strategy(strategy_id: UUID, db: AsyncSession = Depends(get_db
     await db.commit()
 
     app_state.active_strategy = {"id": str(target.id), "name": target.name, **target.config}
+
+    # Reschedule trading cycle with the new strategy's cadence
+    try:
+        cadence = int(target.config.get("refresh_cadence_seconds", 300))
+        scheduler = request.app.state.scheduler
+        scheduler.reschedule_job(
+            "trading_cycle", trigger="interval", seconds=cadence
+        )
+    except Exception:
+        pass  # scheduler not available in tests / before startup
+
     return {"activated": str(target.id), "name": target.name}

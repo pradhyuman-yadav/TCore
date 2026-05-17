@@ -116,6 +116,7 @@ async def poll_stock_prices() -> None:
             time=bar["time"],
             symbol=symbol,
             exchange=exchange,
+            timeframe="1d",  # yfinance daily poll
             open=bar["open"],
             high=bar["high"],
             low=bar["low"],

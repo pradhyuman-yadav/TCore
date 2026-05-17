@@ -16,6 +16,7 @@ class OHLCVRow(BaseModel):
     time: datetime
     symbol: str
     exchange: str
+    timeframe: str = "1m"
     open: float
     high: float
     low: float
@@ -55,6 +56,7 @@ async def fetch_ohlcv(
                 time=bar_time,
                 symbol=symbol,
                 exchange=exchange,
+                timeframe=timeframe,
                 open=o,
                 high=h,
                 low=l,
@@ -97,6 +99,7 @@ async def upsert_ohlcv(rows: list[OHLCVRow], db: AsyncSession) -> int:
             "time": row.time,
             "symbol": row.symbol,
             "exchange": row.exchange,
+            "timeframe": row.timeframe,
             "open": row.open,
             "high": row.high,
             "low": row.low,
@@ -108,7 +111,7 @@ async def upsert_ohlcv(rows: list[OHLCVRow], db: AsyncSession) -> int:
 
     stmt = pg_insert(OHLCV).values(values)
     stmt = stmt.on_conflict_do_update(
-        index_elements=["time", "symbol", "exchange"],
+        index_elements=["time", "symbol", "exchange", "timeframe"],
         set_={
             "open": stmt.excluded.open,
             "high": stmt.excluded.high,

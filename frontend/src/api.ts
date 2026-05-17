@@ -1,9 +1,15 @@
 const BASE = '/api'
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
+  const method = (init?.method || 'GET').toUpperCase()
+  // Only send Content-Type for requests that have a body
+  const hasBody = !['GET', 'HEAD', 'DELETE'].includes(method)
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
     ...init,
+    headers: {
+      ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
+      ...(init?.headers as Record<string, string> | undefined),
+    },
   })
   if (!res.ok) throw new Error(`${res.status} ${await res.text()}`)
   return res.json() as Promise<T>

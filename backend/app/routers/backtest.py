@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import OHLCV
@@ -38,14 +38,18 @@ async def _prefetch_if_needed(
 
     count = (
         await db.execute(
-            select(OHLCV).where(OHLCV.symbol == symbol, OHLCV.exchange == exchange)
+            select(func.count()).where(
+                OHLCV.symbol == symbol,
+                OHLCV.exchange == exchange,
+                OHLCV.timeframe == timeframe,
+            )
         )
-    ).scalars().all()
+    ).scalar_one()
 
-    if len(count) >= min_bars:
-        return len(count)
+    if count >= min_bars:
+        return count
 
-    log.info("backtest.prefetch_start", symbol=symbol, exchange=exchange, have=len(count))
+    log.info("backtest.prefetch_start", symbol=symbol, exchange=exchange, timeframe=timeframe, have=count)
 
     # Determine asset type from watched symbols
     watched = {s["symbol"]: s for s in app_state.watched_symbols}
@@ -70,7 +74,10 @@ async def _prefetch_if_needed(
         try:
             from app.services.stock_feed import fetch_yfinance_history
             from app.services.data_ingestion import OHLCVRow, upsert_ohlcv
-            bars = await fetch_yfinance_history(symbol, asset_type, period="1y", interval="1d")
+            # Map our timeframe to yfinance interval; fall back to "1d" for unsupported
+            _tf_map = {"1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m", "1h": "1h", "4h": "1h", "1d": "1d"}
+            yf_interval = _tf_map.get(timeframe, "1d")
+            bars = await fetch_yfinance_history(symbol, asset_type, period="1y", interval=yf_interval)
             if bars:
                 ohlcv_rows = [
                     OHLCVRow(
@@ -86,7 +93,7 @@ async def _prefetch_if_needed(
         except Exception as exc:
             log.warning("backtest.prefetch_stock_error", error=str(exc))
 
-    return len(count)
+    return count
 
 
 @router.post("/run")
@@ -106,7 +113,11 @@ async def run_backtest_endpoint(
     rows = (
         await db.execute(
             select(OHLCV)
-            .where(OHLCV.symbol == body.symbol, OHLCV.exchange == body.exchange)
+            .where(
+                OHLCV.symbol == body.symbol,
+                OHLCV.exchange == body.exchange,
+                OHLCV.timeframe == body.timeframe,
+            )
             .order_by(OHLCV.time.asc())
         )
     ).scalars().all()

@@ -54,6 +54,7 @@ async def _sync_yfinance(
                 time=dt,
                 symbol=symbol,
                 exchange=exchange,
+                timeframe=interval,   # use actual yfinance interval fetched
                 open=float(row["Open"]),
                 high=float(row["High"]),
                 low=float(row["Low"]),
@@ -74,10 +75,10 @@ async def get_ohlcv(
     limit: int = 200,
     db: AsyncSession = Depends(get_db),
 ):
-    # Fetch latest N rows (desc), then reverse to ascending for charts
+    # Fetch latest N rows (desc) for the requested timeframe, then reverse for chart
     sub = (
         select(OHLCV)
-        .where(OHLCV.symbol == symbol, OHLCV.exchange == exchange)
+        .where(OHLCV.symbol == symbol, OHLCV.exchange == exchange, OHLCV.timeframe == timeframe)
         .order_by(OHLCV.time.desc())
         .limit(limit)
         .subquery()
@@ -136,13 +137,18 @@ async def sync_market_data(
     since = datetime.now(timezone.utc) - timedelta(days=days)
     if exchange in ("yfinance_us", "yfinance_in"):
         rows = await _sync_yfinance(symbol, exchange, timeframe, days)
+        # Compute actual days fetched (may be capped by yfinance interval limits)
+        interval = _YF_INTERVAL_MAP.get(timeframe, "1d")
+        actual_days = min(days, _YF_MAX_DAYS.get(interval, days))
     else:
         rows = await fetch_ohlcv(symbol, exchange, timeframe, since=since)
+        actual_days = days
     count = await upsert_ohlcv(rows, db)
     return {
         "symbol": symbol,
         "exchange": exchange,
         "timeframe": timeframe,
-        "days": days,
+        "days_requested": days,
+        "days_fetched": actual_days,
         "upserted": count,
     }

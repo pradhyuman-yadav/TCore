@@ -105,7 +105,7 @@ export default function StrategyBuilder() {
           <div style={sectionLabel}>Basic Configuration</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
             <TCInput label="Symbol"     value={config.symbol}    onChange={v => setConfig(c => ({ ...c, symbol: String(v) }))}/>
-            <TCSelect label="Exchange"  value={config.exchange}  onChange={v => setConfig(c => ({ ...c, exchange: v }))} options={['binance','coinbase','kraken','bybit']}/>
+            <TCSelect label="Exchange"  value={config.exchange}  onChange={v => setConfig(c => ({ ...c, exchange: v }))} options={['binanceus','binance','coinbase','kraken','bybit']}/>
             <TCSelect label="Timeframe" value={config.timeframe} onChange={v => setConfig(c => ({ ...c, timeframe: v }))} options={['1m','5m','15m','30m','1h','4h','1d']}/>
           </div>
         </div>

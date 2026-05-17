@@ -217,11 +217,12 @@ interface LiveTrade {
   time: number
 }
 
-function useLiveTrades(symbol: string): LiveTrade[] {
+function useLiveTrades(symbol: string, assetType: string): LiveTrade[] {
   const [trades, setTrades] = useState<LiveTrade[]>([])
 
   useEffect(() => {
-    if (!symbol) return
+    // Binance US public trade stream is only available for crypto symbols
+    if (!symbol || assetType !== 'crypto') return
     const base = symbol.replace('/', '').toLowerCase()
     const url  = `wss://stream.binance.us:9443/stream?streams=${base}@trade`
 
@@ -246,18 +247,19 @@ function useLiveTrades(symbol: string): LiveTrade[] {
         }
         ws.onclose = () => { if (!dead) setTimeout(connect, 3000) }
         ws.onerror = () => ws.close()
-      } catch { /* not a crypto symbol */ }
+      } catch { /* ignore */ }
     }
 
     connect()
     return () => { dead = true; ws?.close() }
-  }, [symbol])
+  }, [symbol, assetType])
 
   return trades
 }
 
-function LiveTradesPanel({ symbol }: { symbol: string }) {
-  const trades = useLiveTrades(symbol)
+function LiveTradesPanel({ symbol, assetType }: { symbol: string; assetType: string }) {
+  const trades = useLiveTrades(symbol, assetType)
+  const isCrypto = assetType === 'crypto'
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
@@ -272,7 +274,12 @@ function LiveTradesPanel({ symbol }: { symbol: string }) {
         ))}
       </div>
       <div style={{ flex: 1, overflowY: 'auto' }}>
-        {trades.length === 0 && (
+        {!isCrypto && (
+          <div style={{ padding: '20px 10px', color: TC.textMuted, fontSize: 10, fontFamily: TC.fontMono, textAlign: 'center' }}>
+            Live trades not available<br/>for stocks
+          </div>
+        )}
+        {isCrypto && trades.length === 0 && (
           <div style={{ padding: '20px 10px', color: TC.textMuted, fontSize: 10, fontFamily: TC.fontMono, textAlign: 'center' }}>
             Waiting for trades…
           </div>
@@ -489,19 +496,29 @@ export default function ChartView() {
     }).catch(() => {})
   }, [])
 
-  // Subscribe to /ws/prices for sidebar price badges (all symbols)
+  // Subscribe to /ws/prices for sidebar price badges — auto-reconnects on drop
   useEffect(() => {
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    const ws    = new WebSocket(`${proto}://${window.location.host}/ws/prices`)
-    ws.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data)
-        if (data.type === 'tick') {
-          setLatestPrices(prev => ({ ...prev, [data.symbol]: data.close }))
-        }
-      } catch { /* ignore */ }
+    let ws: WebSocket
+    let dead = false
+
+    function connect() {
+      if (dead) return
+      ws = new WebSocket(`${proto}://${window.location.host}/ws/prices`)
+      ws.onmessage = (e) => {
+        try {
+          const data = JSON.parse(e.data)
+          if (data.type === 'tick') {
+            setLatestPrices(prev => ({ ...prev, [data.symbol]: data.close }))
+          }
+        } catch { /* ignore */ }
+      }
+      ws.onclose = () => { if (!dead) setTimeout(connect, 3000) }
+      ws.onerror = () => ws.close()
     }
-    return () => ws.close()
+
+    connect()
+    return () => { dead = true; ws?.close() }
   }, [])
 
   const handleSelect = useCallback((sym: WatchedSymbol) => {
@@ -646,7 +663,7 @@ export default function ChartView() {
 
         {/* Right: Live public trades */}
         <div style={{ width: 240, flexShrink: 0, borderLeft: `1px solid ${TC.border}`, background: TC.surface, overflow: 'hidden' }}>
-          <LiveTradesPanel symbol={selected?.symbol ?? ''} />
+          <LiveTradesPanel symbol={selected?.symbol ?? ''} assetType={selected?.asset_type ?? ''} />
         </div>
 
       </div>

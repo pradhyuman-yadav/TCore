@@ -158,6 +158,7 @@ class BinanceUSStreamClient:
                 time=bar_time,
                 symbol=symbol,
                 exchange=exchange,
+                timeframe="1m",  # Binance WS kline_1m stream
                 open=float(k["o"]),
                 high=float(k["h"]),
                 low=float(k["l"]),

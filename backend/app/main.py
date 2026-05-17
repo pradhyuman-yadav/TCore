@@ -25,9 +25,9 @@ async def lifespan(app: FastAPI):
         await session.execute(text("SELECT 1"))
         log.info("db.connected")
 
-        controls = (await session.execute(select(Controls))).scalar_one()
-        app_state.kill_switch = controls.kill_switch or False
-        app_state.trading_mode = controls.trading_mode or "paper"
+        controls = (await session.execute(select(Controls))).scalar_one_or_none()
+        app_state.kill_switch = (controls.kill_switch if controls else False) or False
+        app_state.trading_mode = (controls.trading_mode if controls else "paper") or "paper"
 
         strategy = (
             await session.execute(select(Strategy).where(Strategy.is_active == True))
@@ -72,6 +72,15 @@ async def lifespan(app: FastAPI):
     # ── Shutdown ─────────────────────────────────────────────────────────
     await binanceus_stream.stop()
     scheduler.shutdown(wait=False)
+
+    # Close CCXT aiohttp session to prevent ResourceWarning
+    from app.services.exchange_client import _client as _ccxt_client
+    if _ccxt_client is not None:
+        try:
+            await _ccxt_client.close()
+        except Exception:
+            pass
+
     await engine.dispose()
     log.info("shutdown.complete")
 

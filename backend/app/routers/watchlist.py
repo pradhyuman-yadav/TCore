@@ -78,21 +78,7 @@ async def add_watched(body: WatchedSymbolCreate, db: AsyncSession = Depends(get_
     if body.asset_type not in VALID_ASSET_TYPES:
         raise HTTPException(status_code=400, detail=f"asset_type must be one of {VALID_ASSET_TYPES}")
 
-    # Enforce max 10 per type
-    count_result = await db.execute(
-        select(WatchedSymbol).where(
-            WatchedSymbol.asset_type == body.asset_type,
-            WatchedSymbol.is_active == True,
-        )
-    )
-    existing = count_result.scalars().all()
-    if len(existing) >= MAX_PER_TYPE:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Maximum {MAX_PER_TYPE} symbols per asset type reached",
-        )
-
-    # Check duplicate
+    # Check for existing row FIRST (handles reactivation even when at capacity)
     dup = (
         await db.execute(
             select(WatchedSymbol).where(
@@ -104,11 +90,27 @@ async def add_watched(body: WatchedSymbolCreate, db: AsyncSession = Depends(get_
     if dup:
         if dup.is_active:
             raise HTTPException(status_code=409, detail="Symbol already being watched")
-        # Reactivate
+        # Reactivate previously soft-deleted entry — skip max-count check
+        # (it was already counted before; restoring it doesn't add a new slot)
         dup.is_active = True
         await db.commit()
         await _reload_app_state(db)
+        log.info("watchlist.reactivated", symbol=body.symbol)
         return {"id": str(dup.id), "symbol": dup.symbol, "exchange": dup.exchange, "asset_type": dup.asset_type}
+
+    # Enforce max 10 per type only for genuinely new symbols
+    count_result = await db.execute(
+        select(WatchedSymbol).where(
+            WatchedSymbol.asset_type == body.asset_type,
+            WatchedSymbol.is_active == True,
+        )
+    )
+    active_count = len(count_result.scalars().all())
+    if active_count >= MAX_PER_TYPE:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Maximum {MAX_PER_TYPE} symbols per asset type reached",
+        )
 
     row = WatchedSymbol(
         symbol=body.symbol,
@@ -130,6 +132,9 @@ async def remove_watched(symbol_id: uuid.UUID, db: AsyncSession = Depends(get_db
     ).scalars().first()
     if not row:
         raise HTTPException(status_code=404, detail="Watched symbol not found")
+    if not row.is_active:
+        # Already removed — idempotent, no WS reload needed
+        return {"removed": str(symbol_id)}
     row.is_active = False
     await db.commit()
     await _reload_app_state(db)

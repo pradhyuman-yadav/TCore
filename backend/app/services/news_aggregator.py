@@ -100,11 +100,15 @@ async def fetch_openbb_news(symbols: list[str], limit: int = 20) -> list[dict]:
 
 
 def _dedup(items: list[dict]) -> list[dict]:
-    """Deduplicate by URL (keep first seen) or by title hash."""
+    """Deduplicate by URL first; fall back to title hash. Skip blank-title items."""
     seen: set[str] = set()
     out = []
     for item in items:
-        key = item.get("url") or hashlib.md5(item["title"].encode()).hexdigest()
+        title = item.get("title", "").strip()
+        if not title:
+            continue  # drop empty-title articles entirely
+        url = item.get("url")
+        key = url if url else hashlib.md5(title.encode()).hexdigest()
         if key not in seen:
             seen.add(key)
             out.append(item)

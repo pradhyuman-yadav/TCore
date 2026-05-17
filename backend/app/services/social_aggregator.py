@@ -6,6 +6,10 @@ from datetime import datetime, timezone
 
 log = structlog.get_logger()
 
+# Simple in-memory cache for Reddit results (avoids 429 on repeat page loads)
+_reddit_cache: dict[str, tuple[list, float]] = {}
+_REDDIT_CACHE_TTL = 300  # 5 minutes
+
 REDDIT_SUBREDDITS = {
     "crypto": ["Bitcoin", "CryptoCurrency", "ethtrader", "solana", "binance"],
     "us_stock": ["wallstreetbets", "stocks", "investing"],
@@ -119,7 +123,15 @@ def _fetch_rss_sync(url: str, source_name: str, platform: str, limit: int = 20) 
 
 
 async def fetch_reddit_posts(category: str = "crypto", limit_per_sub: int = 15) -> list[dict]:
-    """Fetch Reddit posts for a given category."""
+    """Fetch Reddit posts for a given category — cached for 5 minutes."""
+    import time
+    now = time.monotonic()
+    cached = _reddit_cache.get(category)
+    if cached is not None:
+        posts, ts = cached
+        if now - ts < _REDDIT_CACHE_TTL:
+            return posts
+
     subs = REDDIT_SUBREDDITS.get(category, REDDIT_SUBREDDITS["crypto"])
     loop = asyncio.get_event_loop()
     tasks = [loop.run_in_executor(None, _fetch_reddit_sync, sub, limit_per_sub) for sub in subs]
@@ -129,6 +141,7 @@ async def fetch_reddit_posts(category: str = "crypto", limit_per_sub: int = 15) 
         if isinstance(r, list):
             items.extend(r)
     items.sort(key=lambda x: x.get("score", 0), reverse=True)
+    _reddit_cache[category] = (items, now)
     return items
 
 

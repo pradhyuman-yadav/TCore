@@ -20,14 +20,18 @@ log = structlog.get_logger()
 _DEFAULT_CADENCE = 300  # seconds
 
 
-async def _load_ohlcv_df(symbol: str, exchange: str, db):
+async def _load_ohlcv_df(symbol: str, exchange: str, timeframe: str, db):
     import pandas as pd
     from app.db.models import OHLCV
 
     rows = (
         await db.execute(
             select(OHLCV)
-            .where(OHLCV.symbol == symbol, OHLCV.exchange == exchange)
+            .where(
+                OHLCV.symbol == symbol,
+                OHLCV.exchange == exchange,
+                OHLCV.timeframe == timeframe,
+            )
             .order_by(OHLCV.time.asc())
             .limit(500)
         )
@@ -115,6 +119,7 @@ async def run_trading_cycle() -> None:
 
     symbol: str = strategy.get("symbol", "")
     exchange: str = strategy.get("exchange", "")
+    timeframe: str = strategy.get("timeframe", "1m")
     if not symbol or not exchange:
         return
 
@@ -125,8 +130,8 @@ async def run_trading_cycle() -> None:
         strategy_id = UUID(strategy_id_raw) if strategy_id_raw else None
 
         async with AsyncSessionLocal() as db:
-            # 1. Load OHLCV
-            ohlcv_df = await _load_ohlcv_df(symbol, exchange, db)
+            # 1. Load OHLCV filtered by the strategy's configured timeframe
+            ohlcv_df = await _load_ohlcv_df(symbol, exchange, timeframe, db)
             if ohlcv_df is None or len(ohlcv_df) < 30:
                 log.info("trading_cycle.insufficient_ohlcv", symbol=symbol, rows=0 if ohlcv_df is None else len(ohlcv_df))
                 return
@@ -163,11 +168,19 @@ async def run_trading_cycle() -> None:
                 log.info("trading_cycle.no_composite_score", symbol=symbol)
                 return
 
+            # StrategyBuilder saves thresholds at config root; legacy format stores
+            # them under "rules".  Read root first, fall back to "rules" sub-dict.
             rules_cfg = strategy.get("rules", {})
+            raw_buy = strategy.get("buy_threshold") or rules_cfg.get("buy_threshold", 0.45)
+            raw_sell = strategy.get("sell_threshold") or rules_cfg.get("sell_threshold", 0.35)
+            # sell_threshold in StrategyBuilder is stored as a positive magnitude;
+            # classify_zone expects a negative value (sell when score < -X)
+            buy_threshold  = float(raw_buy)
+            sell_threshold = -abs(float(raw_sell))
             zone = classify_zone(
                 composite,
-                buy_threshold=float(rules_cfg.get("buy_threshold", 0.45)),
-                sell_threshold=float(rules_cfg.get("sell_threshold", -0.35)),
+                buy_threshold=buy_threshold,
+                sell_threshold=sell_threshold,
             )
 
             if strategy_id:
@@ -238,7 +251,7 @@ def setup_scheduler(scheduler: AsyncIOScheduler) -> None:
         seconds=cadence,
         id="trading_cycle",
         replace_existing=True,
-        misfire_grace_time=30,
+        misfire_grace_time=120,  # sentiment LLM calls can take 10-30s
     )
 
     scheduler.add_job(
@@ -254,10 +267,10 @@ def setup_scheduler(scheduler: AsyncIOScheduler) -> None:
     scheduler.add_job(
         poll_stock_prices_job,
         trigger="interval",
-        seconds=60,
+        seconds=300,  # yfinance returns daily bars — polling every 60s was wasteful
         id="stock_prices",
         replace_existing=True,
-        misfire_grace_time=30,
+        misfire_grace_time=60,
     )
 
     log.info("scheduler.job_registered", cadence_seconds=cadence)
