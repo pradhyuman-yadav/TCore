@@ -7,7 +7,11 @@ from typing import Any
 import pandas as pd
 
 from app.services.aggregator import classify_zone, compute_composite_score
-from app.services.indicator_engine import IndicatorConfig, IndicatorDef, compute_indicators
+from app.services.indicator_engine import (
+    IndicatorConfig, IndicatorDef,
+    compute_indicators,                 # kept for live trading cycle
+    compute_indicators_vectorized,      # used in backtests (O(n) vs O(n²))
+)
 from app.services.rule_engine import TradeSignal, evaluate_rules
 
 _MIN_WARMUP_BARS = 30
@@ -167,21 +171,25 @@ def run_backtest(
     open_position: BacktestTrade | None = None
     equity = capital
 
+    # ── Pre-compute all indicators in one vectorised pass — O(n) not O(n²) ──
+    ind_df = compute_indicators_vectorized(ohlcv, indicator_config)
+
     for i in range(_MIN_WARMUP_BARS, len(ohlcv)):
-        window = ohlcv.iloc[: i + 1]
-        price = float(window["close"].iloc[-1])
-        bar_time = window.index[i] if isinstance(window.index[i], datetime) else datetime.utcfromtimestamp(0)
+        price = float(ohlcv["close"].iloc[i])
         try:
             bar_time = pd.Timestamp(ohlcv.index[i]).to_pydatetime()
         except Exception:
             bar_time = datetime.utcnow()
 
-        # Indicator values
-        try:
-            ind_values = compute_indicators(window, indicator_config)
-        except Exception:
-            result.equity_curve.append(round(equity, 4))
-            continue
+        # Extract pre-computed indicator values at this bar (no per-bar recompute)
+        ind_values: dict[str, float | None] = {}
+        for ind in indicator_config.indicators:
+            name = ind.name
+            if name in ind_df.columns:
+                raw = ind_df[name].iloc[i]
+                ind_values[name] = None if pd.isna(raw) else float(raw)
+            else:
+                ind_values[name] = None
 
         composite = compute_composite_score(ind_values, weights)
         if composite is None:

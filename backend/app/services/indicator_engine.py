@@ -4,6 +4,7 @@ import math
 from datetime import datetime, timezone
 from uuid import UUID
 
+import numpy as np
 import pandas as pd
 import pandas_ta as ta
 from pydantic import BaseModel
@@ -123,6 +124,66 @@ def compute_indicators(
             result[ind.name] = None
 
     return result
+
+
+def compute_indicators_vectorized(
+    ohlcv: pd.DataFrame,
+    config: IndicatorConfig,
+) -> pd.DataFrame:
+    """
+    Compute all indicators on the **full** OHLCV DataFrame in a single pass — O(n).
+    Returns a DataFrame with columns = indicator names, same index as ohlcv.
+    Values are in [-1, 1]; NaN where warmup data is insufficient.
+
+    Use this in backtests instead of calling compute_indicators() per-bar,
+    which is O(n²) and will time out on large datasets.
+    """
+    close  = ohlcv["close"]
+    volume = ohlcv["volume"] if "volume" in ohlcv.columns else None
+    out    = pd.DataFrame(index=ohlcv.index)
+
+    for ind in config.indicators:
+        name = ind.name
+        try:
+            if name == "rsi":
+                length = ind.params.get("length", 14)
+                s = ta.rsi(close, length=length)
+                if s is not None:
+                    out[name] = ((s - 50.0) / 50.0).clip(-1.0, 1.0)
+
+            elif name == "macd_hist":
+                macd = ta.macd(close)
+                mcol = "MACDh_12_26_9"
+                if macd is not None and mcol in macd.columns:
+                    # Rolling std up to each bar — avoids look-ahead in normalisation
+                    roll_std = close.expanding(min_periods=2).std()
+                    roll_std = roll_std.where(roll_std > 1e-10).ffill().fillna(1.0)
+                    out[name] = np.tanh(macd[mcol] / roll_std * 10.0).clip(-1.0, 1.0)
+
+            elif name == "bb_position":
+                bbands = ta.bbands(close)
+                bcol = "BBP_5_2.0"
+                if bbands is not None and bcol in bbands.columns:
+                    out[name] = ((bbands[bcol] - 0.5) * 2.0).clip(-1.0, 1.0)
+
+            elif name == "volume_surge":
+                if volume is not None:
+                    mean20 = volume.rolling(20, min_periods=1).mean().clip(lower=1e-10)
+                    out[name] = np.tanh((volume / mean20) - 1.0).clip(-1.0, 1.0)
+
+            elif name == "ema_cross":
+                fast = ind.params.get("fast", 12)
+                slow = ind.params.get("slow", 26)
+                ema_f = ta.ema(close, length=fast)
+                ema_s = ta.ema(close, length=slow)
+                if ema_f is not None and ema_s is not None:
+                    raw = (ema_f - ema_s) / close.clip(lower=1e-10)
+                    out[name] = np.tanh(raw * 100.0).clip(-1.0, 1.0)
+
+        except Exception:
+            pass  # column absent → treated as None in run_backtest
+
+    return out
 
 
 async def snapshot_indicators(

@@ -11,7 +11,20 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
       ...(init?.headers as Record<string, string> | undefined),
     },
   })
-  if (!res.ok) throw new Error(`${res.status} ${await res.text()}`)
+  if (!res.ok) {
+    const text = await res.text()
+    // Try to extract a human-readable detail from JSON error bodies
+    let detail = text
+    try {
+      const json = JSON.parse(text)
+      detail = json.detail ?? json.message ?? text
+    } catch { /* not JSON — use raw text */ }
+    // Strip nginx/proxy HTML for non-200 gateway errors
+    if (detail.trimStart().startsWith('<')) {
+      detail = `Server error (${res.status}). Check network or try again.`
+    }
+    throw new Error(`${res.status} ${detail}`)
+  }
   return res.json() as Promise<T>
 }
 
@@ -163,6 +176,8 @@ export interface BacktestResult {
   symbol: string
   exchange: string
   total_bars: number
+  bars_used: number
+  bars_capped: boolean
   num_trades: number
   total_pnl: number
   win_rate: number

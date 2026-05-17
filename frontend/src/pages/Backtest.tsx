@@ -97,6 +97,7 @@ export default function Backtest() {
   const [running, setRunning] = useState(false)
   const [result,  setResult]  = useState<BacktestResult | null>(null)
   const [error,   setError]   = useState<string | null>(null)
+  const [warning, setWarning] = useState<string | null>(null)
 
   // Load strategies on mount
   useEffect(() => {
@@ -129,6 +130,7 @@ export default function Backtest() {
   const run = async () => {
     setRunning(true)
     setError(null)
+    setWarning(null)
     try {
       const body = {
         symbol,
@@ -143,8 +145,17 @@ export default function Backtest() {
       }
       const res = await api.runBacktest(body)
       setResult(res)
+      if (res.bars_capped) {
+        setWarning(`Dataset capped at ${res.bars_used} bars (most recent). Use a smaller date range or larger timeframe to backtest more history.`)
+      }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Run failed')
+      const raw = e instanceof Error ? e.message : 'Run failed'
+      // api.ts already stripped HTML and extracted JSON detail — just relay it
+      if (raw.startsWith('504')) {
+        setError('Timed out (504). The server took too long. Sync data first: ChartView → select symbol → ⟳ DB Sync.')
+      } else {
+        setError(raw.replace(/^\d{3} /, ''))  // strip leading "422 " etc.
+      }
     }
     setRunning(false)
   }
@@ -274,6 +285,12 @@ export default function Backtest() {
         )}
       </TCCard>
 
+      {warning && (
+        <div style={{ padding: '8px 14px', background: 'rgba(255,204,0,0.07)', border: `1px solid rgba(255,204,0,0.2)`, borderRadius: 5, color: TC.yellow, fontFamily: TC.fontMono, fontSize: 11 }}>
+          ⚠ {warning}
+        </div>
+      )}
+
       {result && (
         <>
           <div style={{ display: 'flex', gap: 10 }}>
@@ -286,7 +303,9 @@ export default function Backtest() {
 
           <TCCard>
             <TCSectionHeader title="Equity Curve" right={
-              <span style={{ color: TC.textMuted, fontSize: 9, fontFamily: TC.fontMono }}>Initial: ${capital.toLocaleString()}</span>
+              <span style={{ color: TC.textMuted, fontSize: 9, fontFamily: TC.fontMono }}>
+                {result.bars_used} bars · Initial: ${capital.toLocaleString()}
+              </span>
             }/>
             <EquityChart curve={result.equity_curve} capital={capital}/>
           </TCCard>

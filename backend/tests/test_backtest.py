@@ -62,26 +62,29 @@ async def test_backtest_trades_are_alternating_buy_sell():
 
 
 async def test_backtest_no_lookahead(monkeypatch):
-    """Verify compute_indicators is never called with future bars."""
-    call_sizes = []
+    """
+    Vectorised path: compute_indicators_vectorized must be called exactly once
+    with the full dataset — no per-bar recomputation, no future-bar slicing.
+    """
+    call_args: list[int] = []
     original = __import__(
-        "app.services.indicator_engine", fromlist=["compute_indicators"]
-    ).compute_indicators
+        "app.services.indicator_engine", fromlist=["compute_indicators_vectorized"]
+    ).compute_indicators_vectorized
 
     def tracking_compute(df, config):
-        call_sizes.append(len(df))
+        call_args.append(len(df))
         return original(df, config)
 
     monkeypatch.setattr(
-        "app.services.backtest_runner.compute_indicators", tracking_compute
+        "app.services.backtest_runner.compute_indicators_vectorized", tracking_compute
     )
 
     df = make_ohlcv_df(100)
     run_backtest(df, STRATEGY)
 
-    # Each call must be strictly increasing (walk-forward, no reuse of future data)
-    for a, b in zip(call_sizes, call_sizes[1:]):
-        assert b >= a, "compute_indicators was called with fewer bars than previous step"
+    # Called exactly once, with the complete dataset — no growing-window slices
+    assert len(call_args) == 1, f"Expected 1 call, got {len(call_args)}"
+    assert call_args[0] == len(df), f"Expected full {len(df)}-bar df, got {call_args[0]}"
 
 
 async def test_backtest_insufficient_data_still_returns(monkeypatch):
