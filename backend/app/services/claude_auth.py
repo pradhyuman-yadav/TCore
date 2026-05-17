@@ -22,21 +22,25 @@ async def get_auth_headers() -> dict[str, str]:
     Returns ready-to-use auth headers for the Anthropic Messages API.
 
     Priority:
-      1. ANTHROPIC_API_KEY env var  →  {"x-api-key": "sk-ant-..."}
-         Standard API key — works in any environment, no OAuth needed.
+      1. ANTHROPIC_API_KEY env var  →  x-api-key header, no beta flag
          Get one at https://console.anthropic.com/settings/keys
-      2. Claude Code OAuth token   →  {"Authorization": "Bearer <token>"}
-         Only works in local dev where `claude login` has been run.
+      2. Claude Code OAuth token    →  x-api-key header + anthropic-beta: oauth-2025-04-20
+         Set CLAUDE_ACCESS_TOKEN (+ optionally CLAUDE_REFRESH_TOKEN) in env.
 
-    Raises RuntimeError if neither is available.
+    NOTE: OAuth tokens use the *same* x-api-key header as API keys — NOT
+    Authorization: Bearer. The beta header tells Anthropic to accept the
+    subscription token format.
     """
     api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
     if api_key:
         return {"x-api-key": api_key}
 
-    # Fall back to OAuth (local dev only)
+    # OAuth path — subscription token
     token = await get_access_token()
-    return {"Authorization": f"Bearer {token}"}
+    return {
+        "x-api-key": token,
+        "anthropic-beta": "oauth-2025-04-20",
+    }
 
 
 def _read_env() -> tuple[str, str, int] | None:
@@ -123,18 +127,19 @@ async def get_access_token() -> str:
     access_token, refresh_token, expires_at = creds
 
     if _is_expired(expires_at):
-        if not refresh_token:
-            raise RuntimeError(
-                "Claude access token expired and no refresh token available. "
-                "Re-run scripts/setup_claude_auth.ps1 or `claude login`."
-            )
-        try:
-            access_token, refresh_token, expires_at = await _do_refresh(refresh_token)
-        except Exception as exc:
-            raise RuntimeError(
-                f"Claude token refresh failed: {exc}. "
-                "Re-run scripts/setup_claude_auth.ps1 to update credentials."
-            ) from exc
+        if refresh_token:
+            try:
+                access_token, refresh_token, expires_at = await _do_refresh(refresh_token)
+            except Exception as exc:
+                # Refresh endpoint (claude.ai/oauth/token) can return 403 when
+                # called from a server process — the token is often still valid
+                # for a while past the expiry timestamp. Log and try anyway.
+                import structlog
+                structlog.get_logger().warning(
+                    "claude_auth.refresh_failed",
+                    error=str(exc),
+                    hint="Token may still work. Re-run setup_claude_auth.ps1 to get fresh tokens.",
+                )
 
     _cached_token = access_token
     _cached_refresh_token = refresh_token
