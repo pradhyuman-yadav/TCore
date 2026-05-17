@@ -121,7 +121,7 @@ async def test_backtest_endpoint_insufficient_data(client):
         },
     )
     assert resp.status_code == 422
-    assert "Insufficient" in resp.json()["detail"]
+    assert "No data" in resp.json()["detail"]
 
 
 async def test_backtest_endpoint_no_strategy_no_config(client):
