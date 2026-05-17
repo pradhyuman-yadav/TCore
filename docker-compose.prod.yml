@@ -18,12 +18,28 @@ services:
       timeout: 5s
       retries: 15
 
+  claude-proxy:
+    image: ghcr.io/${GHCR_OWNER}/tradecore-claude-proxy:latest
+    restart: unless-stopped
+    environment:
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN}
+    expose:
+      - "3456"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3456/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
   backend:
     image: ghcr.io/${GHCR_OWNER}/tradecore-backend:latest
     restart: unless-stopped
     depends_on:
       timescaledb:
         condition: service_healthy
+      # claude-proxy is intentionally NOT a hard dependency here.
+      # Backend starts regardless; sentiment calls fail gracefully if proxy is down.
     environment:
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
@@ -37,7 +53,7 @@ services:
       APP_VERSION: ${APP_VERSION:-0.1.0}
       NTFY_URL: ${NTFY_URL:-}
       NTFY_TOKEN: ${NTFY_TOKEN:-}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_PROXY_URL: http://claude-proxy:3456
     volumes:
       - strategies:/app/strategies
     healthcheck:
