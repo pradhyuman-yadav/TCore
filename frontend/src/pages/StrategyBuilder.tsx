@@ -20,12 +20,13 @@ type StratConfig = typeof DEFAULT_CONFIG
 
 export default function StrategyBuilder() {
   const navigate = useNavigate()
-  const [strategies, setStrategies] = useState<StrategyRow[]>([])
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [config, setConfig]         = useState<StratConfig>(DEFAULT_CONFIG)
-  const [name, setName]             = useState('')
-  const [saved, setSaved]           = useState(false)
-  const [activating, setActivating] = useState(false)
+  const [strategies,  setStrategies]  = useState<StrategyRow[]>([])
+  const [selectedId,  setSelectedId]  = useState<string | null>(null)
+  const [config,      setConfig]      = useState<StratConfig>(DEFAULT_CONFIG)
+  const [name,        setName]        = useState('')
+  const [saved,       setSaved]       = useState(false)
+  const [activating,  setActivating]  = useState(false)
+  const [deleteErr,   setDeleteErr]   = useState<string | null>(null)
 
   useEffect(() => {
     api.listStrategies().then(rows => {
@@ -42,6 +43,18 @@ export default function StrategyBuilder() {
       setTimeout(() => setSaved(false), 2000)
       api.listStrategies().then(setStrategies).catch(() => {})
     } catch { /* ignore */ }
+  }
+
+  const handleDelete = async (id: string) => {
+    setDeleteErr(null)
+    try {
+      await api.deleteStrategy(id)
+      setStrategies(prev => prev.filter(s => s.id !== id))
+      if (selectedId === id) setSelectedId(null)
+    } catch (e: unknown) {
+      setDeleteErr(e instanceof Error ? e.message : 'Delete failed')
+      setTimeout(() => setDeleteErr(null), 4000)
+    }
   }
 
   const handleActivate = async () => {
@@ -78,16 +91,38 @@ export default function StrategyBuilder() {
           {strategies.map(s => {
             const sel = selectedId === s.id
             return (
-              <button key={s.id} onClick={() => setSelectedId(s.id)} style={{
-                width: '100%', textAlign: 'left', padding: '12px 16px', border: 'none', cursor: 'pointer',
+              <div key={s.id} style={{
+                display: 'flex', alignItems: 'flex-start',
                 background: sel ? 'rgba(255,255,255,0.03)' : 'transparent',
                 borderLeft: `2px solid ${s.is_active ? TC.green : sel ? TC.accent : 'transparent'}`,
                 transition: 'all 0.12s',
               }}>
-                <div style={{ color: sel ? TC.text : TC.textMid, fontSize: 12.5, fontFamily: TC.fontUI, fontWeight: sel ? 500 : 400 }}>{s.name}</div>
-                <div style={{ color: TC.textMuted, fontSize: 10, fontFamily: TC.fontMono, marginTop: 4 }}>Created {s.created_at ? new Date(s.created_at).toLocaleDateString() : '—'}</div>
-                {s.is_active && <div style={{ marginTop: 6 }}><TCBadge variant="buy">ACTIVE</TCBadge></div>}
-              </button>
+                <button onClick={() => setSelectedId(s.id)} style={{
+                  flex: 1, textAlign: 'left', padding: '12px 10px 12px 14px',
+                  border: 'none', cursor: 'pointer', background: 'transparent',
+                }}>
+                  <div style={{ color: sel ? TC.text : TC.textMid, fontSize: 12.5, fontFamily: TC.fontUI, fontWeight: sel ? 500 : 400 }}>{s.name}</div>
+                  <div style={{ color: TC.textMuted, fontSize: 10, fontFamily: TC.fontMono, marginTop: 4 }}>
+                    {s.created_at ? new Date(s.created_at).toLocaleDateString() : '—'}
+                  </div>
+                  {s.is_active && <div style={{ marginTop: 6 }}><TCBadge variant="buy">ACTIVE</TCBadge></div>}
+                </button>
+                {/* Delete — disabled for active strategy */}
+                <button
+                  onClick={() => handleDelete(s.id)}
+                  disabled={s.is_active}
+                  title={s.is_active ? 'Cannot delete active strategy' : 'Delete strategy'}
+                  style={{
+                    padding: '10px 10px 0', border: 'none', background: 'transparent',
+                    color: s.is_active ? TC.border : TC.textMuted,
+                    cursor: s.is_active ? 'not-allowed' : 'pointer',
+                    fontSize: 16, lineHeight: 1, flexShrink: 0,
+                    transition: 'color 0.12s',
+                  }}
+                  onMouseEnter={e => { if (!s.is_active) (e.currentTarget as HTMLElement).style.color = TC.red }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = s.is_active ? TC.border : TC.textMuted }}
+                >×</button>
+              </div>
             )
           })}
         </div>
@@ -147,6 +182,13 @@ export default function StrategyBuilder() {
             <TCInput label="Max Daily Loss"     value={config.max_daily_loss} onChange={v => setConfig(c => ({ ...c, max_daily_loss: Number(v) }))} type="number" suffix="USDT"/>
           </div>
         </div>
+
+        {/* Delete error banner */}
+        {deleteErr && (
+          <div style={{ marginBottom: 12, padding: '8px 12px', background: 'rgba(255,68,68,0.08)', border: `1px solid rgba(255,68,68,0.25)`, borderRadius: 5, color: TC.red, fontFamily: TC.fontMono, fontSize: 11 }}>
+            ✗ {deleteErr}
+          </div>
+        )}
 
         {/* Action buttons */}
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', paddingTop: 8, borderTop: `1px solid ${TC.border}` }}>

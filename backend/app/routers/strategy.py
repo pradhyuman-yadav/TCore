@@ -68,6 +68,19 @@ async def get_strategy(strategy_id: UUID, db: AsyncSession = Depends(get_db)):
     }
 
 
+@router.delete("/{strategy_id}", status_code=204)
+async def delete_strategy(strategy_id: UUID, db: AsyncSession = Depends(get_db)):
+    target = (
+        await db.execute(select(Strategy).where(Strategy.id == strategy_id))
+    ).scalars().first()
+    if target is None:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+    if target.is_active:
+        raise HTTPException(status_code=409, detail="Cannot delete the active strategy — deactivate it first")
+    await db.delete(target)
+    await db.commit()
+
+
 @router.post("/{strategy_id}/activate")
 async def activate_strategy(strategy_id: UUID, request: Request, db: AsyncSession = Depends(get_db)):
     # Deactivate all

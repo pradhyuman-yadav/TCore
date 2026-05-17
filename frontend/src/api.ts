@@ -44,6 +44,8 @@ export const api = {
     req('/strategy', { method: 'POST', body: JSON.stringify({ name, config }) }),
   activateStrategy: (id: string) =>
     req(`/strategy/${id}/activate`, { method: 'POST' }),
+  deleteStrategy: (id: string) =>
+    req(`/strategy/${id}`, { method: 'DELETE' }),
 
   // Paper
   paperPositions: () => req<Position[]>('/paper/positions'),
