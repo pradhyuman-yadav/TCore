@@ -65,17 +65,21 @@ def _reset_app_state():
         app_state.trading_mode,
         app_state.kill_switch,
         dict(app_state.daily_pnl),
+        dict(app_state.paper_account),
     )
     app_state.active_strategy = dict(_STRATEGY)
     app_state.trading_mode = "paper"
     app_state.kill_switch = False
     app_state.daily_pnl = {}
+    # zero fees so price / pnl assertions are exact
+    app_state.paper_account = {"initial_capital": 10_000.0, "fee_rate": 0.0, "slippage_bps": 0.0}
     yield
     (
         app_state.active_strategy,
         app_state.trading_mode,
         app_state.kill_switch,
         app_state.daily_pnl,
+        app_state.paper_account,
     ) = saved
 
 

@@ -14,6 +14,25 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 from sqlalchemy import text
 
 
+@pytest.fixture(autouse=True)
+def _zero_paper_fees():
+    """
+    Reset paper_account fees to zero for every test.
+    Real defaults (0.1% fee, 5 bps slip) are correct for production but break
+    assertions that expect exact prices / zero-fee PnL.  Individual tests that
+    want to verify fee behaviour should override app_state.paper_account directly.
+    """
+    from app.state import app_state
+    saved = dict(app_state.paper_account)
+    app_state.paper_account = {
+        "initial_capital": 10_000.0,
+        "fee_rate": 0.0,
+        "slippage_bps": 0.0,
+    }
+    yield
+    app_state.paper_account = saved
+
+
 @pytest.fixture(scope="session")
 def event_loop():
     """Single event loop shared across all tests — prevents asyncpg cross-loop errors."""
