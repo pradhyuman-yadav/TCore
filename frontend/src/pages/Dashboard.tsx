@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api, Position, Trade } from '../api'
+import { api, ClaudeHealth, Position, Trade } from '../api'
 import { useStore } from '../store'
 import { TC } from '../theme'
 import { TCCard, TCBadge, TCSectionHeader, TCTable, TCEmpty, ColDef } from '../components/ui'
@@ -188,6 +188,58 @@ function StatusCard({ label, value, sub, status }: { label: string; value: strin
   )
 }
 
+// ── Claude Health Card ───────────────────────────────────────────────────────
+function ClaudeCard() {
+  const [health, setHealth]   = useState<ClaudeHealth | null>(null)
+  const [testing, setTesting] = useState(false)
+
+  const test = async () => {
+    setTesting(true)
+    try {
+      const h = await api.getClaudeHealth()
+      setHealth(h)
+    } catch {
+      setHealth({ status: 'error', model: null, test_score: null, latency_ms: null, detail: 'Request failed' })
+    }
+    setTesting(false)
+  }
+
+  useEffect(() => { test() }, [])
+
+  const isOk  = health?.status === 'ok'
+  const col   = health === null ? TC.textMuted : isOk ? TC.green : TC.red
+  const label = health === null ? '…' : isOk ? `${health.latency_ms}ms` : 'ERROR'
+
+  return (
+    <TCCard style={{ padding: '14px 16px', flex: 1, minWidth: 0 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div style={{ color: TC.textMuted, fontSize: 9, fontFamily: TC.fontMono, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 10 }}>Claude AI</div>
+        <button onClick={test} disabled={testing} style={{
+          padding: '2px 8px', borderRadius: 3, cursor: testing ? 'not-allowed' : 'pointer',
+          border: `1px solid ${TC.border}`, background: 'transparent',
+          color: TC.textMuted, fontFamily: TC.fontMono, fontSize: 9, fontWeight: 700,
+        }}>
+          {testing ? '…' : '▶ TEST'}
+        </button>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ width: 7, height: 7, borderRadius: '50%', background: col, boxShadow: `0 0 7px ${col}`, flexShrink: 0 }}/>
+        <span style={{ color: TC.text, fontFamily: TC.fontMono, fontWeight: 600, fontSize: 13 }}>{label}</span>
+      </div>
+      {health?.status === 'ok' && health.test_score !== null && (
+        <div style={{ color: TC.textMuted, fontSize: 10, fontFamily: TC.fontMono, marginTop: 5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          score {health.test_score > 0 ? '+' : ''}{health.test_score?.toFixed(3)} · {health.model}
+        </div>
+      )}
+      {health?.status === 'error' && (
+        <div style={{ color: TC.red, fontSize: 10, fontFamily: TC.fontMono, marginTop: 5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {health.detail}
+        </div>
+      )}
+    </TCCard>
+  )
+}
+
 // ── Dashboard ───────────────────────────────────────────────────────────────
 export default function Dashboard() {
   const { killSwitch, tradingMode, activeStrategy } = useStore()
@@ -239,6 +291,7 @@ export default function Dashboard() {
         <StatusCard label="Scheduler"       value="Running"                          sub={`Cycle ${tick}`}                             status="ok"/>
         <StatusCard label="Kill Switch"     value={killSwitch ? 'ACTIVE' : 'Off'}    sub={killSwitch ? 'Trading halted' : 'Enabled'}   status={killSwitch ? 'error' : 'ok'}/>
         <StatusCard label="Active Strategy" value={stratName}                        sub={tradingMode.toUpperCase()}                   status={stratName === 'None' ? 'warn' : 'ok'}/>
+        <ClaudeCard/>
       </div>
 
       {/* Positions + Trades */}

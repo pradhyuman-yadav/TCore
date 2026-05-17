@@ -1,3 +1,5 @@
+import time
+
 from fastapi import APIRouter, Request
 from sqlalchemy import text
 
@@ -7,6 +9,38 @@ from app.state import app_state
 from app.ws.manager import ws_manager
 
 router = APIRouter()
+
+
+@router.get("/health/claude")
+async def claude_health():
+    """
+    Live smoke-test of the Claude integration.
+    Calls Claude Haiku with a short BTC sentiment prompt and returns the result.
+    """
+    from app.services.claude_auth import get_access_token
+    from app.services.sentiment_agent import _call_claude
+
+    try:
+        await get_access_token()  # verify token accessible (fast path)
+    except Exception as exc:
+        return {"status": "error", "detail": f"Token unavailable: {exc}", "model": None, "test_score": None, "latency_ms": None}
+
+    try:
+        t0 = time.monotonic()
+        score, reasoning = await _call_claude(
+            ["Bitcoin reaches new all-time high amid institutional buying"],
+            "BTC/USDT",
+        )
+        latency_ms = int((time.monotonic() - t0) * 1000)
+        return {
+            "status": "ok",
+            "model": "claude-haiku-4-5-20251001",
+            "test_score": round(score, 4),
+            "reasoning": reasoning,
+            "latency_ms": latency_ms,
+        }
+    except Exception as exc:
+        return {"status": "error", "detail": str(exc), "model": None, "test_score": None, "latency_ms": None}
 
 
 @router.get("/health")

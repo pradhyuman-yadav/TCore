@@ -75,6 +75,9 @@ export const api = {
   runBacktest: (body: BacktestRequest) =>
     req<BacktestResult>('/backtest/run', { method: 'POST', body: JSON.stringify(body) }),
 
+  // Claude health
+  getClaudeHealth: () => req<ClaudeHealth>('/health/claude'),
+
   // Paper account
   getPaperAccount: () => req<PaperAccount>('/paper/account'),
   setPaperAccount: (config: PaperAccountConfig) =>
@@ -210,6 +213,15 @@ export interface NewsArticle {
   published_at: string | null
   url: string | null
   summary: string
+}
+
+export interface ClaudeHealth {
+  status: 'ok' | 'error'
+  model: string | null
+  test_score: number | null
+  reasoning?: string
+  latency_ms: number | null
+  detail?: string
 }
 
 export interface SocialPost {
