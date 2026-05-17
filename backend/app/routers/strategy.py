@@ -52,6 +52,22 @@ async def create_strategy(body: StrategyCreate, db: AsyncSession = Depends(get_d
     return {"id": str(strategy.id), "name": strategy.name, "is_active": strategy.is_active}
 
 
+@router.get("/{strategy_id}")
+async def get_strategy(strategy_id: UUID, db: AsyncSession = Depends(get_db)):
+    target = (
+        await db.execute(select(Strategy).where(Strategy.id == strategy_id))
+    ).scalars().first()
+    if target is None:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+    return {
+        "id": str(target.id),
+        "name": target.name,
+        "is_active": target.is_active,
+        "config": target.config,
+        "created_at": target.created_at.isoformat() if target.created_at else None,
+    }
+
+
 @router.post("/{strategy_id}/activate")
 async def activate_strategy(strategy_id: UUID, request: Request, db: AsyncSession = Depends(get_db)):
     # Deactivate all

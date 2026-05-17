@@ -53,9 +53,17 @@ export const api = {
   livePositions: () => req<Position[]>('/live/positions'),
   liveTrades: (limit = 50) => req<Trade[]>(`/live/trades?limit=${limit}`),
 
+  // Strategy detail
+  getStrategy: (id: string) => req<StrategyDetail>(`/strategy/${id}`),
+
   // Backtest
   runBacktest: (body: BacktestRequest) =>
     req<BacktestResult>('/backtest/run', { method: 'POST', body: JSON.stringify(body) }),
+
+  // Paper account
+  getPaperAccount: () => req<PaperAccount>('/paper/account'),
+  setPaperAccount: (config: PaperAccountConfig) =>
+    req<PaperAccount>('/paper/account', { method: 'PUT', body: JSON.stringify(config) }),
 
   // Watchlist
   getWatchlist: () => req<WatchedSymbol[]>('/watchlist'),
@@ -115,11 +123,37 @@ export interface Trade {
   created_at: string | null
 }
 
+export interface StrategyDetail {
+  id: string
+  name: string
+  is_active: boolean
+  config: Record<string, unknown>
+  created_at: string | null
+}
+
+export interface PaperAccount {
+  initial_capital: number
+  fee_rate: number
+  slippage_bps: number
+  realized_pnl: number
+  open_positions: number
+}
+
+export interface PaperAccountConfig {
+  initial_capital: number
+  fee_rate: number
+  slippage_bps: number
+}
+
 export interface BacktestRequest {
   symbol: string
   exchange: string
   timeframe?: string
   initial_capital?: number
+  fee_rate?: number
+  slippage_bps?: number
+  date_from?: string
+  date_to?: string
   strategy_config?: Record<string, unknown>
 }
 

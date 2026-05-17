@@ -19,6 +19,10 @@ class BacktestRequest(BaseModel):
     exchange: str
     timeframe: str = "1h"
     initial_capital: float = 10_000.0
+    fee_rate: float = 0.001       # maker/taker fee, e.g. 0.001 = 0.1%
+    slippage_bps: float = 0.0    # slippage in basis points
+    date_from: str | None = None  # ISO date string, e.g. "2024-01-01"
+    date_to:   str | None = None  # ISO date string, e.g. "2024-06-01"
     strategy_config: dict | None = None  # uses active strategy if None
 
 
@@ -110,15 +114,21 @@ async def run_backtest_endpoint(
     # Auto-fetch historical data if insufficient
     await _prefetch_if_needed(body.symbol, body.exchange, body.timeframe, db)
 
+    filters = [
+        OHLCV.symbol == body.symbol,
+        OHLCV.exchange == body.exchange,
+        OHLCV.timeframe == body.timeframe,
+    ]
+    if body.date_from:
+        from datetime import datetime
+        filters.append(OHLCV.time >= datetime.fromisoformat(body.date_from).replace(tzinfo=timezone.utc))
+    if body.date_to:
+        from datetime import datetime
+        filters.append(OHLCV.time <= datetime.fromisoformat(body.date_to).replace(tzinfo=timezone.utc))
+
     rows = (
         await db.execute(
-            select(OHLCV)
-            .where(
-                OHLCV.symbol == body.symbol,
-                OHLCV.exchange == body.exchange,
-                OHLCV.timeframe == body.timeframe,
-            )
-            .order_by(OHLCV.time.asc())
+            select(OHLCV).where(*filters).order_by(OHLCV.time.asc())
         )
     ).scalars().all()
 
@@ -143,5 +153,11 @@ async def run_backtest_endpoint(
         ]
     ).set_index("time")
 
-    result = run_backtest(df, strategy_config, initial_capital=body.initial_capital)
+    result = run_backtest(
+        df,
+        strategy_config,
+        initial_capital=body.initial_capital,
+        fee_rate=body.fee_rate,
+        slippage_bps=body.slippage_bps,
+    )
     return result.to_dict()

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { api, WatchedSymbol } from '../api'
+import { api, WatchedSymbol, PaperAccount, PaperAccountConfig } from '../api'
 import { TC } from '../theme'
 import { TCSectionHeader } from '../components/ui'
 import { createChart, ColorType, CrosshairMode } from 'lightweight-charts'
@@ -476,24 +476,163 @@ function IndicatorBar({ label, value, weight }: { label: string; value: number; 
   )
 }
 
+// ── Paper Account Modal ───────────────────────────────────────────────────
+function PaperAccountModal({ onClose }: { onClose: () => void }) {
+  const [account,  setAccount]  = useState<PaperAccount | null>(null)
+  const [capital,  setCapital]  = useState(10000)
+  const [feeRate,  setFeeRate]  = useState(0.1)   // displayed as percent
+  const [slipBps,  setSlipBps]  = useState(5)
+  const [saving,   setSaving]   = useState(false)
+  const [saved,    setSaved]    = useState(false)
+
+  useEffect(() => {
+    api.getPaperAccount().then(a => {
+      setAccount(a)
+      setCapital(a.initial_capital)
+      setFeeRate(+(a.fee_rate * 100).toFixed(4))  // decimal → percent
+      setSlipBps(a.slippage_bps)
+    }).catch(() => {})
+  }, [])
+
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      const cfg: PaperAccountConfig = {
+        initial_capital: capital,
+        fee_rate: feeRate / 100,   // percent → decimal
+        slippage_bps: slipBps,
+      }
+      const updated = await api.setPaperAccount(cfg)
+      setAccount(prev => prev ? { ...prev, ...updated } : updated)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 1500)
+    } catch { /* ignore */ }
+    setSaving(false)
+  }
+
+  const iStyle: React.CSSProperties = {
+    padding: '7px 10px', background: 'rgba(255,255,255,0.05)',
+    border: `1px solid ${TC.border}`, borderRadius: 5,
+    color: TC.text, fontFamily: TC.fontMono, fontSize: 12,
+    outline: 'none', width: '100%', boxSizing: 'border-box',
+  }
+  const lStyle: React.CSSProperties = {
+    color: TC.textMuted, fontSize: 9.5, fontFamily: TC.fontMono,
+    letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 5,
+  }
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 999,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }} onClick={onClose}>
+      <div style={{
+        background: TC.surface2, border: `1px solid ${TC.border}`, borderRadius: 10,
+        padding: 24, width: 380, display: 'flex', flexDirection: 'column', gap: 16,
+      }} onClick={e => e.stopPropagation()}>
+
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ color: TC.text, fontFamily: TC.fontMono, fontSize: 13, fontWeight: 700 }}>
+            Paper Account Setup
+          </span>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: TC.textMuted, cursor: 'pointer', fontSize: 18, lineHeight: 1 }}>×</button>
+        </div>
+
+        {/* Live stats */}
+        {account && (
+          <div style={{ display: 'flex', gap: 10 }}>
+            <div style={{ flex: 1, padding: '10px 12px', background: TC.surface, borderRadius: 6, border: `1px solid ${TC.border}` }}>
+              <div style={{ color: TC.textMuted, fontSize: 9, fontFamily: TC.fontMono, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 5 }}>Realized P&L</div>
+              <div style={{ color: account.realized_pnl >= 0 ? TC.green : TC.red, fontFamily: TC.fontMono, fontSize: 16, fontWeight: 700 }}>
+                {account.realized_pnl >= 0 ? '+' : ''}{account.realized_pnl.toFixed(2)} USDT
+              </div>
+            </div>
+            <div style={{ flex: 1, padding: '10px 12px', background: TC.surface, borderRadius: 6, border: `1px solid ${TC.border}` }}>
+              <div style={{ color: TC.textMuted, fontSize: 9, fontFamily: TC.fontMono, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 5 }}>Open Positions</div>
+              <div style={{ color: TC.accent, fontFamily: TC.fontMono, fontSize: 16, fontWeight: 700 }}>{account.open_positions}</div>
+            </div>
+          </div>
+        )}
+
+        {/* Config fields */}
+        <div>
+          <div style={lStyle}>Initial Capital (USDT)</div>
+          <input type="number" value={capital} min={100} step={100}
+            onChange={e => setCapital(parseFloat(e.target.value) || 10000)}
+            style={{ ...iStyle, color: TC.accent }}/>
+          <div style={{ color: TC.textMuted, fontSize: 10, fontFamily: TC.fontMono, marginTop: 4 }}>
+            Starting virtual balance for paper trades
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div>
+            <div style={lStyle}>Fee Rate (%)</div>
+            <input type="number" value={feeRate} min={0} max={5} step={0.01}
+              onChange={e => setFeeRate(parseFloat(e.target.value) || 0)}
+              style={iStyle}/>
+            <div style={{ color: TC.textMuted, fontSize: 10, fontFamily: TC.fontMono, marginTop: 4 }}>
+              e.g. 0.1 = 0.1% per trade
+            </div>
+          </div>
+          <div>
+            <div style={lStyle}>Slippage (bps)</div>
+            <input type="number" value={slipBps} min={0} max={500} step={1}
+              onChange={e => setSlipBps(parseInt(e.target.value) || 0)}
+              style={iStyle}/>
+            <div style={{ color: TC.textMuted, fontSize: 10, fontFamily: TC.fontMono, marginTop: 4 }}>
+              1 bps = 0.01% price impact
+            </div>
+          </div>
+        </div>
+
+        {/* Note */}
+        <div style={{ padding: '8px 10px', background: 'rgba(255,204,0,0.06)', border: `1px solid rgba(255,204,0,0.18)`, borderRadius: 5, color: TC.textMuted, fontSize: 10, fontFamily: TC.fontMono }}>
+          Changes apply to new fills only. Past trades are not recalculated.
+        </div>
+
+        {/* Buttons */}
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={{ padding: '7px 18px', background: 'transparent', border: `1px solid ${TC.border}`, borderRadius: 5, color: TC.textMuted, fontFamily: TC.fontMono, fontSize: 11, cursor: 'pointer' }}>
+            Cancel
+          </button>
+          <button onClick={handleSave} disabled={saving} style={{
+            padding: '7px 18px', background: saved ? TC.greenDim : TC.accentDim,
+            border: `1px solid ${saved ? TC.green : TC.accent}`,
+            borderRadius: 5, color: saved ? TC.green : TC.accent,
+            fontFamily: TC.fontMono, fontSize: 11, fontWeight: 700, cursor: saving ? 'not-allowed' : 'pointer',
+          }}>
+            {saved ? '✓ Saved' : saving ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+
 // ── Main Page ─────────────────────────────────────────────────────────────
 export default function ChartView() {
-  const [watchlist, setWatchlist]       = useState<WatchedSymbol[]>([])
-  const [selected, setSelected]         = useState<WatchedSymbol | null>(null)
-  const [timeframe, setTimeframe]       = useState('1m')
-  const [livePrice, setLivePrice]       = useState<number | null>(null)
-  const [syncing, setSyncing]           = useState(false)
-  const [syncDays, setSyncDays]         = useState(90)
-  const [syncResult, setSyncResult]     = useState<string | null>(null)
-  const [showAddModal, setShowAddModal] = useState(false)
-  const [latestPrices, setLatestPrices] = useState<Record<string, number>>({})
+  const [watchlist, setWatchlist]           = useState<WatchedSymbol[]>([])
+  const [selected, setSelected]             = useState<WatchedSymbol | null>(null)
+  const [timeframe, setTimeframe]           = useState('1m')
+  const [livePrice, setLivePrice]           = useState<number | null>(null)
+  const [syncing, setSyncing]               = useState(false)
+  const [syncDays, setSyncDays]             = useState(90)
+  const [syncResult, setSyncResult]         = useState<string | null>(null)
+  const [showAddModal, setShowAddModal]     = useState(false)
+  const [showAccountModal, setShowAccountModal] = useState(false)
+  const [latestPrices, setLatestPrices]     = useState<Record<string, number>>({})
+  const [paperPnl, setPaperPnl]             = useState<number | null>(null)
 
-  // Load watchlist on mount
+  // Load watchlist + paper account on mount
   useEffect(() => {
     api.getWatchlist().then(rows => {
       setWatchlist(rows)
       if (rows.length > 0) setSelected(rows[0])
     }).catch(() => {})
+    api.getPaperAccount().then(a => setPaperPnl(a.realized_pnl)).catch(() => {})
   }, [])
 
   // Subscribe to /ws/prices for sidebar price badges — auto-reconnects on drop
@@ -624,8 +763,28 @@ export default function ChartView() {
           </span>
         )}
 
-        <div style={{ marginLeft: 'auto', color: TC.textMuted, fontSize: 9, fontFamily: TC.fontMono, opacity: 0.7 }}>
-          Binance US live · 100ms sampling
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+          {/* Paper P&L quick badge */}
+          {paperPnl !== null && (
+            <span style={{
+              fontFamily: TC.fontMono, fontSize: 10, fontWeight: 700,
+              color: paperPnl >= 0 ? TC.green : TC.red,
+              opacity: 0.85,
+            }}>
+              Paper P&L: {paperPnl >= 0 ? '+' : ''}{paperPnl.toFixed(2)} USDT
+            </span>
+          )}
+          {/* Paper account setup button */}
+          <button onClick={() => setShowAccountModal(true)} style={{
+            padding: '3px 10px', borderRadius: 4, cursor: 'pointer',
+            background: TC.yellowDim, border: `1px solid ${TC.yellow}44`,
+            color: TC.yellow, fontFamily: TC.fontMono, fontSize: 10, fontWeight: 700,
+          }} title="Configure paper trading account">
+            ⚙ Paper
+          </button>
+          <span style={{ color: TC.textMuted, fontSize: 9, fontFamily: TC.fontMono, opacity: 0.6 }}>
+            Binance US · 100ms
+          </span>
         </div>
       </div>
 
@@ -684,6 +843,14 @@ export default function ChartView() {
 
       {showAddModal && (
         <AddSymbolModal onAdd={handleAdd} onClose={() => setShowAddModal(false)}/>
+      )}
+
+      {showAccountModal && (
+        <PaperAccountModal onClose={() => {
+          setShowAccountModal(false)
+          // Refresh P&L after potential config change
+          api.getPaperAccount().then(a => setPaperPnl(a.realized_pnl)).catch(() => {})
+        }}/>
       )}
     </div>
   )

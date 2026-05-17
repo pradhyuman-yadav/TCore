@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { api, StrategyRow } from '../api'
 import { TC } from '../theme'
 import { TCCard, TCBadge, TCSlider, TCInput, TCSelect } from '../components/ui'
@@ -18,6 +19,7 @@ const DEFAULT_CONFIG = {
 type StratConfig = typeof DEFAULT_CONFIG
 
 export default function StrategyBuilder() {
+  const navigate = useNavigate()
   const [strategies, setStrategies] = useState<StrategyRow[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [config, setConfig]         = useState<StratConfig>(DEFAULT_CONFIG)
@@ -161,6 +163,21 @@ export default function StrategyBuilder() {
             border: `1px solid ${strategies.find(s => s.id === selectedId)?.is_active ? TC.green : TC.border}`,
             color: strategies.find(s => s.id === selectedId)?.is_active ? TC.green : TC.textMid,
           }}>{strategies.find(s => s.id === selectedId)?.is_active ? '✓ ACTIVE' : activating ? 'ACTIVATING…' : 'ACTIVATE'}</button>
+
+          <button
+            onClick={() => selectedId && navigate(`/backtest?strategy=${selectedId}`)}
+            disabled={!selectedId}
+            style={{
+              padding: '8px 22px', borderRadius: 5,
+              cursor: selectedId ? 'pointer' : 'not-allowed',
+              fontFamily: TC.fontMono, fontSize: 11, fontWeight: 700, letterSpacing: '0.05em',
+              background: 'transparent',
+              border: `1px solid ${selectedId ? TC.accent : TC.border}`,
+              color: selectedId ? TC.accent : TC.textMuted,
+              transition: 'all 0.15s',
+            }}
+            title={selectedId ? 'Run backtest with this strategy' : 'Select a strategy first'}
+          >▶ BACKTEST</button>
         </div>
       </div>
     </div>

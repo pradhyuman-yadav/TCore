@@ -63,20 +63,41 @@ class BacktestResult:
         }
 
 
+_SHORT_TO_FULL = {
+    "macd":   "macd_hist",
+    "bb":     "bb_position",
+    "ema":    "ema_cross",
+    "volume": "volume_surge",
+}
+
+
 def _build_indicator_config(strategy_config: dict) -> IndicatorConfig:
     tech_names = {"rsi", "macd_hist", "bb_position", "volume_surge", "ema_cross"}
-    indicators_cfg = strategy_config.get("indicators", {})
     defs = []
-    for name, cfg in indicators_cfg.items():
-        if name not in tech_names:
-            continue
-        weight = float(cfg.get("weight", 0.0)) if isinstance(cfg, dict) else 0.0
-        params = {
-            k: v
-            for k, v in (cfg.items() if isinstance(cfg, dict) else {})
-            if k not in ("weight", "cache_ttl_minutes")
-        }
-        defs.append(IndicatorDef(name=name, weight=weight, params=params))
+
+    indicators_cfg = strategy_config.get("indicators")
+    if indicators_cfg:
+        # New format: {"indicators": {"rsi": {"weight": 0.5, ...}, ...}}
+        for name, cfg in indicators_cfg.items():
+            full_name = _SHORT_TO_FULL.get(name, name)
+            if full_name not in tech_names:
+                continue
+            weight = float(cfg.get("weight", 0.0)) if isinstance(cfg, dict) else 0.0
+            params = {
+                k: v
+                for k, v in (cfg.items() if isinstance(cfg, dict) else {})
+                if k not in ("weight", "cache_ttl_minutes")
+            }
+            defs.append(IndicatorDef(name=full_name, weight=weight, params=params))
+    else:
+        # StrategyBuilder flat format: {"weights": {"rsi": 0.25, "macd": 0.20, ...}}
+        weights_cfg = strategy_config.get("weights", {})
+        for name, weight in weights_cfg.items():
+            full_name = _SHORT_TO_FULL.get(name, name)
+            if full_name not in tech_names:
+                continue
+            defs.append(IndicatorDef(name=full_name, weight=float(weight), params={}))
+
     return IndicatorConfig(indicators=defs)
 
 
@@ -113,6 +134,8 @@ def run_backtest(
     ohlcv: pd.DataFrame,
     strategy_config: dict,
     initial_capital: float = 10_000.0,
+    fee_rate: float = 0.001,
+    slippage_bps: float = 0.0,
 ) -> BacktestResult:
     """
     Walk-forward backtest over a pre-loaded OHLCV DataFrame.
@@ -125,9 +148,12 @@ def run_backtest(
     indicator_config = _build_indicator_config(strategy_config)
 
     weights: dict[str, float] = {ind.name: ind.weight for ind in indicator_config.indicators}
+    # StrategyBuilder stores thresholds at root; legacy format uses "rules" sub-dict
     rules_cfg = strategy_config.get("rules", {})
-    buy_threshold = float(rules_cfg.get("buy_threshold", 0.45))
-    sell_threshold = float(rules_cfg.get("sell_threshold", -0.35))
+    raw_buy  = strategy_config.get("buy_threshold")  or rules_cfg.get("buy_threshold",  0.45)
+    raw_sell = strategy_config.get("sell_threshold") or rules_cfg.get("sell_threshold", 0.35)
+    buy_threshold  = float(raw_buy)
+    sell_threshold = -abs(float(raw_sell))  # always negative: sell when score < -X
     sizing = strategy_config.get("position_sizing", {})
     amount_usdt = float(sizing.get("amount", 100.0))
     max_open = int(sizing.get("max_open_positions", 1))
@@ -173,27 +199,35 @@ def run_backtest(
             strategy_config=strategy_config,
         )
 
+        slip = slippage_bps / 10_000
+
         if signal.action == "buy" and open_position is None:
-            qty = amount_usdt / price
+            fill_price = price * (1 + slip)
+            qty = amount_usdt / fill_price
+            buy_fee = fill_price * qty * fee_rate
+            equity -= buy_fee          # fee paid immediately on entry
             open_position = BacktestTrade(
-                bar_index=i, time=bar_time, side="buy", price=price, quantity=qty
+                bar_index=i, time=bar_time, side="buy", price=fill_price, quantity=qty
             )
             result.trades.append(open_position)
 
         elif signal.action == "sell" and open_position is not None:
             qty = open_position.quantity
-            pnl = (price - open_position.price) * qty
+            fill_price = price * (1 - slip)
+            sell_fee = fill_price * qty * fee_rate
+            gross_pnl = (fill_price - open_position.price) * qty
+            net_pnl = gross_pnl - sell_fee
             sell_trade = BacktestTrade(
-                bar_index=i, time=bar_time, side="sell", price=price, quantity=qty, pnl=pnl
+                bar_index=i, time=bar_time, side="sell", price=fill_price, quantity=qty, pnl=net_pnl
             )
             result.trades.append(sell_trade)
-            daily_pnl += pnl
-            equity += pnl
+            daily_pnl += net_pnl
+            equity += net_pnl
             open_position = None
 
         result.equity_curve.append(round(equity, 4))
 
-    # Close any open position at last bar's price
+    # Close any open position at last bar's price (mark-to-market, no fee)
     if open_position is not None and len(ohlcv) > 0:
         last_price = float(ohlcv["close"].iloc[-1])
         pnl = (last_price - open_position.price) * open_position.quantity
