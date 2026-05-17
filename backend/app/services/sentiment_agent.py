@@ -102,7 +102,14 @@ async def _call_claude(headlines: list[str], symbol: str) -> tuple[float, str]:
     """Route to proxy if available, otherwise direct API."""
     if _PROXY_URL:
         return await _call_claude_proxy(headlines, symbol)
+    # Direct path — requires ANTHROPIC_API_KEY or Claude OAuth credentials
+    # If neither is configured, raises RuntimeError with a clear message
     return await _call_claude_direct(headlines, symbol)
+
+
+def claude_mode() -> str:
+    """Returns 'proxy' or 'direct' based on current config."""
+    return "proxy" if _PROXY_URL else "direct"
 
 
 async def score_sentiment(

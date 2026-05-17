@@ -18,10 +18,20 @@ async def claude_health():
     Live smoke-test of the Claude integration.
     Checks proxy health first, then makes a real sentiment call.
     """
-    from app.services.sentiment_agent import _call_claude, _PROXY_URL, _MODEL, _MODEL_DIRECT
+    from app.services.sentiment_agent import _call_claude, _PROXY_URL, _MODEL, _MODEL_DIRECT, claude_mode
 
-    mode = "proxy" if _PROXY_URL else "direct"
+    mode = claude_mode()
     model = _MODEL if _PROXY_URL else _MODEL_DIRECT
+
+    # If neither proxy nor direct credentials are configured, return clear error immediately
+    if not _PROXY_URL:
+        import os
+        if not os.environ.get("ANTHROPIC_API_KEY") and not os.environ.get("CLAUDE_ACCESS_TOKEN"):
+            return {
+                "status": "error", "mode": mode, "model": model,
+                "detail": "No Claude config found. Set CLAUDE_CODE_OAUTH_TOKEN (proxy) or ANTHROPIC_API_KEY (direct).",
+                "test_score": None, "latency_ms": None,
+            }
 
     # Fast path: verify proxy is reachable before an inference call
     if _PROXY_URL:
