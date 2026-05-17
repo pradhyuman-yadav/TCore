@@ -141,6 +141,7 @@ async def test_backtest_endpoint_with_ohlcv(client, db_session):
             time=datetime(2024, 1, 1, tzinfo=timezone.utc) + timedelta(hours=i),
             symbol="BTC/USDT",
             exchange="binance",
+            timeframe="1h",   # must match the default BacktestRequest.timeframe
             open=40000.0,
             high=41000.0,
             low=39000.0,
@@ -156,6 +157,7 @@ async def test_backtest_endpoint_with_ohlcv(client, db_session):
         json={
             "symbol": "BTC/USDT",
             "exchange": "binance",
+            "timeframe": "1h",
             "strategy_config": STRATEGY,
             "initial_capital": 5000.0,
         },

@@ -47,6 +47,7 @@ def _make_ohlcv_rows(n: int = 60, price: float = 50_000.0) -> list[OHLCV]:
             time=now - timedelta(hours=(n - i)),
             symbol=SYMBOL,
             exchange=EXCHANGE,
+            timeframe="1h",   # must match _STRATEGY["timeframe"]
             open=price,
             high=price * 1.01,
             low=price * 0.99,
