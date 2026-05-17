@@ -17,6 +17,28 @@ _cached_expires_at: int = 0
 _cached_refresh_token: str = ""
 
 
+async def get_auth_headers() -> dict[str, str]:
+    """
+    Returns ready-to-use auth headers for the Anthropic Messages API.
+
+    Priority:
+      1. ANTHROPIC_API_KEY env var  →  {"x-api-key": "sk-ant-..."}
+         Standard API key — works in any environment, no OAuth needed.
+         Get one at https://console.anthropic.com/settings/keys
+      2. Claude Code OAuth token   →  {"Authorization": "Bearer <token>"}
+         Only works in local dev where `claude login` has been run.
+
+    Raises RuntimeError if neither is available.
+    """
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if api_key:
+        return {"x-api-key": api_key}
+
+    # Fall back to OAuth (local dev only)
+    token = await get_access_token()
+    return {"Authorization": f"Bearer {token}"}
+
+
 def _read_env() -> tuple[str, str, int] | None:
     token = os.environ.get("CLAUDE_ACCESS_TOKEN", "")
     refresh = os.environ.get("CLAUDE_REFRESH_TOKEN", "")

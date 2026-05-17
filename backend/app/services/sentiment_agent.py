@@ -8,7 +8,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.claude_auth import get_access_token
+from app.services.claude_auth import get_auth_headers
 
 _ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
 _MODEL = "claude-haiku-4-5-20251001"
@@ -23,8 +23,8 @@ def _clamp(v: float) -> float:
 
 
 async def _call_claude(headlines: list[str], symbol: str) -> tuple[float, str]:
-    """Calls Claude via OAuth Bearer token. Returns (score, reasoning)."""
-    token = await get_access_token()
+    """Calls Claude API. Returns (score, reasoning)."""
+    auth_headers = await get_auth_headers()
     joined = "\n".join(f"- {h}" for h in headlines)
     prompt = (
         f"You are a financial sentiment analyzer. Score the overall sentiment of these "
@@ -38,7 +38,7 @@ async def _call_claude(headlines: list[str], symbol: str) -> tuple[float, str]:
         resp = await client.post(
             _ANTHROPIC_MESSAGES_URL,
             headers={
-                "Authorization": f"Bearer {token}",
+                **auth_headers,
                 "anthropic-version": "2023-06-01",
                 "content-type": "application/json",
             },

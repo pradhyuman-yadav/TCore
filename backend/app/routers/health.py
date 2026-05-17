@@ -17,13 +17,13 @@ async def claude_health():
     Live smoke-test of the Claude integration.
     Calls Claude Haiku with a short BTC sentiment prompt and returns the result.
     """
-    from app.services.claude_auth import get_access_token
+    from app.services.claude_auth import get_auth_headers
     from app.services.sentiment_agent import _call_claude
 
     try:
-        await get_access_token()  # verify token accessible (fast path)
+        await get_auth_headers()  # verify credentials accessible (fast path)
     except Exception as exc:
-        return {"status": "error", "detail": f"Token unavailable: {exc}", "model": None, "test_score": None, "latency_ms": None}
+        return {"status": "error", "detail": str(exc), "model": None, "test_score": None, "latency_ms": None}
 
     try:
         t0 = time.monotonic()
