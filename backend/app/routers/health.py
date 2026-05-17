@@ -1,5 +1,6 @@
 import time
 
+import httpx
 from fastapi import APIRouter, Request
 from sqlalchemy import text
 
@@ -15,15 +16,25 @@ router = APIRouter()
 async def claude_health():
     """
     Live smoke-test of the Claude integration.
-    Calls Claude Haiku with a short BTC sentiment prompt and returns the result.
+    Checks proxy health first, then makes a real sentiment call.
     """
-    from app.services.claude_auth import get_auth_headers
-    from app.services.sentiment_agent import _call_claude
+    from app.services.sentiment_agent import _call_claude, _PROXY_URL, _MODEL, _MODEL_DIRECT
 
-    try:
-        await get_auth_headers()  # verify credentials accessible (fast path)
-    except Exception as exc:
-        return {"status": "error", "detail": str(exc), "model": None, "test_score": None, "latency_ms": None}
+    mode = "proxy" if _PROXY_URL else "direct"
+    model = _MODEL if _PROXY_URL else _MODEL_DIRECT
+
+    # Fast path: verify proxy is reachable before an inference call
+    if _PROXY_URL:
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                r = await client.get(f"{_PROXY_URL}/health")
+                r.raise_for_status()
+        except Exception as exc:
+            return {
+                "status": "error", "mode": mode, "model": model,
+                "detail": f"Proxy unreachable: {exc}",
+                "test_score": None, "latency_ms": None,
+            }
 
     try:
         t0 = time.monotonic()
@@ -34,13 +45,18 @@ async def claude_health():
         latency_ms = int((time.monotonic() - t0) * 1000)
         return {
             "status": "ok",
-            "model": "claude-haiku-4-5-20251001",
+            "mode": mode,
+            "model": model,
             "test_score": round(score, 4),
             "reasoning": reasoning,
             "latency_ms": latency_ms,
         }
     except Exception as exc:
-        return {"status": "error", "detail": str(exc), "model": None, "test_score": None, "latency_ms": None}
+        return {
+            "status": "error", "mode": mode, "model": model,
+            "detail": str(exc),
+            "test_score": None, "latency_ms": None,
+        }
 
 
 @router.get("/health")

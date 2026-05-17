@@ -14,12 +14,29 @@ services:
       timeout: 5s
       retries: 10
 
+  claude-proxy:
+    build: ./docker/claude-proxy
+    environment:
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN}
+    expose:
+      - "3456"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3456/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
   backend:
     build: ./backend
     depends_on:
       timescaledb:
         condition: service_healthy
+      claude-proxy:
+        condition: service_healthy
     env_file: .env
+    environment:
+      CLAUDE_PROXY_URL: http://claude-proxy:3456
     ports: ["8000:8000"]
     volumes:
       - ./strategies:/app/strategies
