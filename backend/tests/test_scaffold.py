@@ -17,9 +17,11 @@ def test_docker_compose_has_no_redis():
 
 
 def test_env_example_has_required_keys():
+    # Claude auth is set directly in Portainer — not required in .env.example.
+    # Either ANTHROPIC_API_KEY or CLAUDE_* OAuth vars work; neither is mandatory here.
     required = {
         "DB_USER", "DB_PASSWORD", "DB_HOST", "DB_PORT", "DB_NAME",
-        "CLAUDE_ACCESS_TOKEN", "CLAUDE_REFRESH_TOKEN", "CCXT_EXCHANGE", "TRADING_MODE",
+        "CCXT_EXCHANGE", "TRADING_MODE",
     }
     path = os.path.join(os.path.dirname(__file__), "..", "..", ".env.example")
     with open(path) as f:
