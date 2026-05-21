@@ -40,6 +40,7 @@ services:
       NTFY_URL: ${NTFY_URL:-}
       NTFY_TOKEN: ${NTFY_TOKEN:-}
       CLAUDE_PROXY_URL: ${CLAUDE_PROXY_URL:-}
+      CLAUDE_PROXY_API_KEY: ${CLAUDE_PROXY_API_KEY:-any}
     volumes:
       - strategies:/app/strategies
     healthcheck:

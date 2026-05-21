@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 #   Routes requests through Claude Code CLI → subscription, no API credits.
 # Fallback: direct Anthropic API (requires ANTHROPIC_API_KEY)
 _PROXY_URL = os.environ.get("CLAUDE_PROXY_URL", "").rstrip("/")
+_PROXY_API_KEY = os.environ.get("CLAUDE_PROXY_API_KEY", "any")  # Bearer token for proxy
 _ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 _MODEL = "claude-haiku-4"           # proxy model alias
 _MODEL_DIRECT = "claude-haiku-4-5-20251001"   # direct API model id
@@ -28,7 +29,7 @@ def _clamp(v: float) -> float:
 
 
 async def _call_claude_proxy(headlines: list[str], symbol: str) -> tuple[float, str]:
-    """Call claude-max-api-proxy (OpenAI-compatible). No auth headers needed."""
+    """Call claude-max-api-proxy (OpenAI-compatible)."""
     joined = "\n".join(f"- {h}" for h in headlines)
     system = (
         "You are a financial sentiment analyzer. "
@@ -41,7 +42,10 @@ async def _call_claude_proxy(headlines: list[str], symbol: str) -> tuple[float, 
     async with httpx.AsyncClient(timeout=60.0) as client:
         resp = await client.post(
             f"{_PROXY_URL}/v1/chat/completions",
-            headers={"content-type": "application/json"},
+            headers={
+                "content-type": "application/json",
+                "authorization": f"Bearer {_PROXY_API_KEY}",
+            },
             json={
                 "model": _MODEL,
                 "max_tokens": 128,
