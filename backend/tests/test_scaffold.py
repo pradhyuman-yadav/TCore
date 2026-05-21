@@ -2,11 +2,11 @@ import yaml
 import os
 
 
-def test_docker_compose_has_required_services():
+def test_docker_compose_has_three_services():
     path = os.path.join(os.path.dirname(__file__), "..", "..", "docker-compose.yml")
     with open(path) as f:
         cfg = yaml.safe_load(f)
-    assert {"timescaledb", "backend", "frontend", "claude-proxy"}.issubset(set(cfg["services"].keys()))
+    assert set(cfg["services"].keys()) == {"timescaledb", "backend", "frontend"}
 
 
 def test_docker_compose_has_no_redis():
