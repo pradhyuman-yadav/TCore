@@ -90,6 +90,17 @@ export const api = {
   removeWatchedSymbol: (id: string) =>
     req(`/watchlist/${id}`, { method: 'DELETE' }),
 
+  // Feed sources
+  getNewsSources:    () => req<FeedSource[]>('/sources/news'),
+  addNewsSource:     (name: string, url: string) =>
+    req<FeedSource>('/sources/news', { method: 'POST', body: JSON.stringify({ name, url }) }),
+  removeNewsSource:  (id: string) => req(`/sources/news/${id}`, { method: 'DELETE' }),
+
+  getSocialSources:  () => req<FeedSource[]>('/sources/social'),
+  addSocialSource:   (body: { type: string; name: string; url?: string; category?: string }) =>
+    req<FeedSource>('/sources/social', { method: 'POST', body: JSON.stringify(body) }),
+  removeSocialSource:(id: string) => req(`/sources/social/${id}`, { method: 'DELETE' }),
+
   // Signals history
   getSignals: (params?: { limit?: number; symbol?: string }) => {
     const p = new URLSearchParams({ limit: String(params?.limit ?? 200) })
@@ -237,6 +248,16 @@ export interface SocialPost {
   comments: number
   published_at: string | null
   platform: string
+}
+
+export interface FeedSource {
+  id: string
+  type: string        // rss_news | reddit | rss_social
+  name: string
+  url: string | null
+  category: string | null
+  is_active: boolean
+  added_at: string | null
 }
 
 export interface StoredSignal {

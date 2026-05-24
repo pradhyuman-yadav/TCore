@@ -8,13 +8,34 @@ from typing import Any
 
 log = structlog.get_logger()
 
-RSS_FEEDS = [
+# Fallback list used only if DB is unavailable
+_DEFAULT_RSS_FEEDS = [
     ("CoinDesk",      "https://www.coindesk.com/arc/outboundfeeds/rss/"),
     ("CoinTelegraph", "https://cointelegraph.com/rss"),
     ("Decrypt",       "https://decrypt.co/feed"),
     ("Reuters",       "https://feeds.reuters.com/reuters/businessNews"),
     ("ET Markets",    "https://economictimes.indiatimes.com/markets/rss.cms"),
 ]
+
+
+async def _get_rss_feeds() -> list[tuple[str, str]]:
+    """Load active RSS news sources from DB, falling back to defaults."""
+    try:
+        from sqlalchemy import select
+        from app.db.models import FeedSource
+        from app.db.session import AsyncSessionLocal
+        async with AsyncSessionLocal() as db:
+            rows = (await db.execute(
+                select(FeedSource).where(
+                    FeedSource.type == "rss_news",
+                    FeedSource.is_active == True,
+                )
+            )).scalars().all()
+        if rows:
+            return [(r.name, r.url) for r in rows if r.url]
+    except Exception:
+        pass
+    return _DEFAULT_RSS_FEEDS
 
 
 def _parse_rss_feed_sync(url: str, source_name: str, limit: int = 20) -> list[dict]:
@@ -54,11 +75,12 @@ def _parse_rss_feed_sync(url: str, source_name: str, limit: int = 20) -> list[di
 
 
 async def fetch_rss_news(limit_per_feed: int = 15) -> list[dict]:
-    """Fetch from all RSS feeds concurrently (in thread pools)."""
+    """Fetch from all active RSS feeds (loaded from DB) concurrently."""
+    feeds = await _get_rss_feeds()
     loop = asyncio.get_event_loop()
     tasks = [
         loop.run_in_executor(None, _parse_rss_feed_sync, url, name, limit_per_feed)
-        for name, url in RSS_FEEDS
+        for name, url in feeds
     ]
     results = await asyncio.gather(*tasks, return_exceptions=True)
     items = []

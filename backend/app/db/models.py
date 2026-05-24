@@ -215,3 +215,19 @@ class SocialPost(Base):
     fetched_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default="NOW()"
     )
+
+
+class FeedSource(Base):
+    __tablename__ = "feed_sources"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    type: Mapped[str] = mapped_column(Text, nullable=False)   # rss_news | reddit | rss_social
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    url: Mapped[str | None] = mapped_column(Text)
+    category: Mapped[str | None] = mapped_column(Text)        # crypto | us_stock | indian_stock
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="TRUE")
+    added_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default="NOW()"
+    )

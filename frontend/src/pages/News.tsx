@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { api, NewsArticle } from '../api'
+import { api, NewsArticle, FeedSource } from '../api'
 import { TC } from '../theme'
 import { TCBadge, TCSectionHeader } from '../components/ui'
 
@@ -16,11 +16,117 @@ function timeAgo(isoStr: string | null): string {
   return `${Math.floor(hrs / 24)}d ago`
 }
 
+function SourcesPanel({ onClose }: { onClose: () => void }) {
+  const [sources, setSources] = useState<FeedSource[]>([])
+  const [name, setName]       = useState('')
+  const [url, setUrl]         = useState('')
+  const [adding, setAdding]   = useState(false)
+  const [err, setErr]         = useState<string | null>(null)
+
+  const load = () => api.getNewsSources().then(setSources).catch(() => {})
+  useEffect(() => { load() }, [])
+
+  const add = async () => {
+    if (!name.trim() || !url.trim()) return
+    setAdding(true); setErr(null)
+    try {
+      await api.addNewsSource(name.trim(), url.trim())
+      setName(''); setUrl('')
+      await load()
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Failed')
+    }
+    setAdding(false)
+  }
+
+  const remove = async (id: string) => {
+    await api.removeNewsSource(id).catch(() => {})
+    await load()
+  }
+
+  const inp: React.CSSProperties = {
+    padding: '5px 8px', background: TC.surface2, border: `1px solid ${TC.border}`,
+    borderRadius: 4, color: TC.text, fontFamily: TC.fontMono, fontSize: 11,
+    outline: 'none', width: '100%', boxSizing: 'border-box',
+  }
+
+  return (
+    <div style={{
+      width: 280, borderLeft: `1px solid ${TC.border}`, background: TC.surface,
+      display: 'flex', flexDirection: 'column', flexShrink: 0,
+    }}>
+      <div style={{
+        padding: '10px 14px', borderBottom: `1px solid ${TC.border}`,
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      }}>
+        <span style={{ color: TC.text, fontFamily: TC.fontMono, fontSize: 12, fontWeight: 700 }}>
+          RSS Sources
+        </span>
+        <button onClick={onClose} style={{
+          background: 'none', border: 'none', color: TC.textMuted,
+          cursor: 'pointer', fontFamily: TC.fontMono, fontSize: 14, padding: 0,
+        }}>✕</button>
+      </div>
+
+      {/* Current sources */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
+        {sources.length === 0 && (
+          <div style={{ color: TC.textMuted, fontSize: 11, fontFamily: TC.fontMono, padding: '8px 14px' }}>
+            No sources yet
+          </div>
+        )}
+        {sources.map(s => (
+          <div key={s.id} style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '6px 14px', borderBottom: `1px solid ${TC.border}`,
+            opacity: s.is_active ? 1 : 0.4,
+          }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ color: s.is_active ? TC.text : TC.textMuted, fontFamily: TC.fontMono, fontSize: 11, fontWeight: 600 }}>
+                {s.name}
+              </div>
+              <div style={{ color: TC.textMuted, fontSize: 9.5, fontFamily: TC.fontMono, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {s.url}
+              </div>
+            </div>
+            {s.is_active && (
+              <button onClick={() => remove(s.id)} title="Remove" style={{
+                background: 'none', border: 'none', color: TC.textMuted,
+                cursor: 'pointer', fontSize: 12, padding: '0 2px', flexShrink: 0,
+              }}>✕</button>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Add form */}
+      <div style={{ padding: '12px 14px', borderTop: `1px solid ${TC.border}` }}>
+        <div style={{ color: TC.textMuted, fontSize: 9, fontFamily: TC.fontMono, letterSpacing: '0.1em', marginBottom: 8, textTransform: 'uppercase' }}>
+          Add RSS Feed
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <input placeholder="Name (e.g. Bloomberg)" value={name} onChange={e => setName(e.target.value)} style={inp}/>
+          <input placeholder="Feed URL" value={url} onChange={e => setUrl(e.target.value)} style={inp}/>
+          {err && <div style={{ color: TC.red, fontSize: 10, fontFamily: TC.fontMono }}>{err}</div>}
+          <button onClick={add} disabled={adding || !name.trim() || !url.trim()} style={{
+            padding: '5px 0', background: TC.accent, border: 'none', borderRadius: 4,
+            color: TC.bg, fontFamily: TC.fontMono, fontSize: 11, fontWeight: 700,
+            cursor: adding ? 'wait' : 'pointer', opacity: (!name.trim() || !url.trim()) ? 0.4 : 1,
+          }}>
+            {adding ? 'Adding…' : '+ Add Feed'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function News() {
   const [articles, setArticles]   = useState<NewsArticle[]>([])
   const [loading, setLoading]     = useState(true)
   const [filter, setFilter]       = useState('All')
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
+  const [showSources, setShowSources] = useState(false)
 
   const SOURCES = ['All', 'CoinDesk', 'CoinTelegraph', 'Decrypt', 'Reuters', 'ET Markets', 'OpenBB']
 
@@ -67,7 +173,7 @@ export default function News() {
             }}>{s}</button>
           ))}
         </div>
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
           {lastRefresh && (
             <span style={{ color: TC.textMuted, fontSize: 9.5, fontFamily: TC.fontMono }}>
               Updated {timeAgo(lastRefresh.toISOString())}
@@ -79,26 +185,39 @@ export default function News() {
           }}>
             {loading ? '⟳ Loading…' : '⟳ Refresh'}
           </button>
+          <button onClick={() => setShowSources(v => !v)} style={{
+            padding: '3px 10px', background: showSources ? TC.accentDim : 'transparent',
+            border: `1px solid ${showSources ? TC.accent : TC.border}`,
+            borderRadius: 4, color: showSources ? TC.accent : TC.textMid,
+            fontFamily: TC.fontMono, fontSize: 10, cursor: 'pointer',
+          }}>
+            ⚙ Sources
+          </button>
         </div>
       </div>
 
-      {/* Article list */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '12px 18px' }}>
-        {loading && articles.length === 0 && (
-          <div style={{ color: TC.textMuted, fontFamily: TC.fontMono, fontSize: 12, textAlign: 'center', marginTop: 60 }}>
-            Loading news…
+      {/* Body: article list + optional sources panel */}
+      <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+        {/* Article list */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '12px 18px' }}>
+          {loading && articles.length === 0 && (
+            <div style={{ color: TC.textMuted, fontFamily: TC.fontMono, fontSize: 12, textAlign: 'center', marginTop: 60 }}>
+              Loading news…
+            </div>
+          )}
+          {!loading && filtered.length === 0 && (
+            <div style={{ color: TC.textMuted, fontFamily: TC.fontMono, fontSize: 12, textAlign: 'center', marginTop: 60 }}>
+              No articles found
+            </div>
+          )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {filtered.map((article, i) => (
+              <ArticleCard key={i} article={article}/>
+            ))}
           </div>
-        )}
-        {!loading && filtered.length === 0 && (
-          <div style={{ color: TC.textMuted, fontFamily: TC.fontMono, fontSize: 12, textAlign: 'center', marginTop: 60 }}>
-            No articles found
-          </div>
-        )}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {filtered.map((article, i) => (
-            <ArticleCard key={i} article={article}/>
-          ))}
         </div>
+
+        {showSources && <SourcesPanel onClose={() => setShowSources(false)}/>}
       </div>
     </div>
   )

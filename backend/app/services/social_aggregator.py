@@ -10,29 +10,68 @@ log = structlog.get_logger()
 _reddit_cache: dict[str, tuple[list, float]] = {}
 _REDDIT_CACHE_TTL = 300  # 5 minutes
 
-REDDIT_SUBREDDITS = {
-    "crypto": ["Bitcoin", "CryptoCurrency", "ethtrader", "solana", "binance"],
-    "us_stock": ["wallstreetbets", "stocks", "investing"],
-    "indian_stock": ["IndianStockMarket", "IndiaInvestments"],
-}
-
 NITTER_INSTANCES = [
     "https://nitter.poast.org",
     "https://nitter.privacydev.net",
 ]
 
-CRYPTO_RSS = [
+# Fallbacks used if DB is unavailable
+_DEFAULT_REDDIT: dict[str, list[str]] = {
+    "crypto":       ["Bitcoin", "CryptoCurrency", "ethtrader", "solana", "binance"],
+    "us_stock":     ["wallstreetbets", "stocks", "investing"],
+    "indian_stock": ["IndianStockMarket", "IndiaInvestments"],
+}
+_DEFAULT_CRYPTO_RSS = [
     ("CoinDesk",      "https://www.coindesk.com/arc/outboundfeeds/rss/"),
     ("CoinTelegraph", "https://cointelegraph.com/rss"),
     ("Decrypt",       "https://decrypt.co/feed"),
     ("The Block",     "https://www.theblock.co/rss.xml"),
 ]
-
-STOCK_RSS = [
+_DEFAULT_STOCK_RSS = [
     ("ET Markets",    "https://economictimes.indiatimes.com/markets/rss.cms"),
     ("Moneycontrol",  "https://www.moneycontrol.com/rss/MCtopnews.xml"),
     ("Reuters Biz",   "https://feeds.reuters.com/reuters/businessNews"),
 ]
+
+
+async def _get_reddit_subs(category: str) -> list[str]:
+    try:
+        from sqlalchemy import select
+        from app.db.models import FeedSource
+        from app.db.session import AsyncSessionLocal
+        async with AsyncSessionLocal() as db:
+            rows = (await db.execute(
+                select(FeedSource).where(
+                    FeedSource.type == "reddit",
+                    FeedSource.category == category,
+                    FeedSource.is_active == True,
+                )
+            )).scalars().all()
+        if rows:
+            return [r.name for r in rows]
+    except Exception:
+        pass
+    return _DEFAULT_REDDIT.get(category, [])
+
+
+async def _get_rss_social(category: str) -> list[tuple[str, str]]:
+    try:
+        from sqlalchemy import select
+        from app.db.models import FeedSource
+        from app.db.session import AsyncSessionLocal
+        async with AsyncSessionLocal() as db:
+            rows = (await db.execute(
+                select(FeedSource).where(
+                    FeedSource.type == "rss_social",
+                    FeedSource.category == category,
+                    FeedSource.is_active == True,
+                )
+            )).scalars().all()
+        if rows:
+            return [(r.name, r.url) for r in rows if r.url]
+    except Exception:
+        pass
+    return _DEFAULT_CRYPTO_RSS if category == "crypto" else _DEFAULT_STOCK_RSS
 
 
 def _fetch_reddit_sync(subreddit: str, limit: int = 25) -> list[dict]:
@@ -132,7 +171,7 @@ async def fetch_reddit_posts(category: str = "crypto", limit_per_sub: int = 15) 
         if now - ts < _REDDIT_CACHE_TTL:
             return posts
 
-    subs = REDDIT_SUBREDDITS.get(category, REDDIT_SUBREDDITS["crypto"])
+    subs = await _get_reddit_subs(category)
     loop = asyncio.get_event_loop()
     tasks = [loop.run_in_executor(None, _fetch_reddit_sync, sub, limit_per_sub) for sub in subs]
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -161,8 +200,8 @@ async def fetch_twitter_posts(query: str = "bitcoin OR crypto", limit: int = 20)
 
 
 async def fetch_rss_posts(category: str = "crypto") -> list[dict]:
-    """Fetch from RSS feeds for the given category."""
-    feeds = CRYPTO_RSS if category != "us_stock" and category != "indian_stock" else STOCK_RSS
+    """Fetch from RSS feeds for the given category (loaded from DB)."""
+    feeds = await _get_rss_social(category)
     loop = asyncio.get_event_loop()
     tasks = [loop.run_in_executor(None, _fetch_rss_sync, url, name, "rss", 15) for name, url in feeds]
     results = await asyncio.gather(*tasks, return_exceptions=True)
