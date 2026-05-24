@@ -205,6 +205,19 @@ async def run_trading_cycle() -> None:
                 action=signal.action,
             )
 
+            # 6b. Persist signal to DB
+            from app.db.models import Signal as SignalRecord
+            db.add(SignalRecord(
+                symbol=symbol,
+                exchange=exchange,
+                zone=zone,
+                score=composite,
+                action=signal.action.upper(),
+                reason=signal.reason,
+                strategy_id=strategy_id,
+            ))
+            await db.flush()
+
             # 7. Execute
             if strategy_id:
                 await execute_signal(signal, symbol, exchange, strategy_id, composite, db)

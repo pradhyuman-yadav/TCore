@@ -6,6 +6,7 @@ interface Signal {
   score: number
   action: string
   ts: string
+  reason?: string
 }
 
 export interface PriceTick {
@@ -48,7 +49,11 @@ export const useStore = create<AppStore>((set) => ({
   setTradingMode: (v) => set({ tradingMode: v }),
   setActiveStrategy: (s) => set({ activeStrategy: s }),
   pushSignal: (s) =>
-    set((state) => ({ signals: [s, ...state.signals].slice(0, 100) })),
+    set((state) => {
+      const key = `${s.symbol}|${s.ts}`
+      if (state.signals.some(x => `${x.symbol}|${x.ts}` === key)) return state
+      return { signals: [s, ...state.signals].slice(0, 500) }
+    }),
   setWsStatus: (s) => set({ wsStatus: s }),
   setLatestTick: (t) => set({ latestTick: t }),
 }))

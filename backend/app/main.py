@@ -8,7 +8,7 @@ from sqlalchemy import select, text
 from app.config import settings
 from app.db.models import Controls, Strategy
 from app.db.session import AsyncSessionLocal, engine
-from app.routers import backtest, control, health, live, market, news, paper, social, strategy, watchlist, ws
+from app.routers import backtest, control, health, live, market, news, paper, signals, social, strategy, watchlist, ws
 from app.scheduler.jobs import setup_scheduler
 from app.state import app_state
 from app.ws.manager import ws_manager
@@ -96,5 +96,6 @@ app.include_router(live.router)
 app.include_router(ws.router)
 app.include_router(backtest.router)
 app.include_router(watchlist.router)
+app.include_router(signals.router)
 app.include_router(news.router)
 app.include_router(social.router)

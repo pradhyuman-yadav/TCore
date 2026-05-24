@@ -90,16 +90,23 @@ export const api = {
   removeWatchedSymbol: (id: string) =>
     req(`/watchlist/${id}`, { method: 'DELETE' }),
 
+  // Signals history
+  getSignals: (params?: { limit?: number; symbol?: string }) => {
+    const p = new URLSearchParams({ limit: String(params?.limit ?? 200) })
+    if (params?.symbol) p.set('symbol', params.symbol)
+    return req<StoredSignal[]>(`/signals?${p}`)
+  },
+
   // News
-  getNews: (symbols?: string[], limit = 50) => {
-    const params = new URLSearchParams({ limit: String(limit) })
+  getNews: (symbols?: string[], limit = 50, refresh = false) => {
+    const params = new URLSearchParams({ limit: String(limit), refresh: String(refresh) })
     if (symbols?.length) params.set('symbols', symbols.join(','))
     return req<NewsArticle[]>(`/news?${params}`)
   },
 
   // Social
-  getSocial: (source: 'reddit' | 'twitter' | 'rss', category = 'crypto', query = 'bitcoin OR crypto', limit = 30) =>
-    req<SocialPost[]>(`/social?source=${source}&category=${category}&query=${encodeURIComponent(query)}&limit=${limit}`),
+  getSocial: (source: 'reddit' | 'twitter' | 'rss', category = 'crypto', query = 'bitcoin OR crypto', limit = 30, refresh = false) =>
+    req<SocialPost[]>(`/social?source=${source}&category=${category}&query=${encodeURIComponent(query)}&limit=${limit}&refresh=${refresh}`),
 }
 
 // Types
@@ -232,4 +239,16 @@ export interface SocialPost {
   comments: number
   published_at: string | null
   platform: string
+}
+
+export interface StoredSignal {
+  id: string
+  symbol: string
+  exchange: string
+  zone: string
+  score: number
+  action: string
+  reason: string | null
+  strategy_id: string | null
+  triggered_at: string
 }

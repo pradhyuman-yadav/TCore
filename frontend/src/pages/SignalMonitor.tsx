@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { api } from '../api'
 import { useStore } from '../store'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { TC } from '../theme'
@@ -77,15 +78,32 @@ function SignalRow({ signal, highlight }: { signal: SignalEvent; highlight: bool
 }
 
 export default function SignalMonitor() {
-  const { signals: rawSignals, wsStatus } = useStore()
+  const { signals: rawSignals, wsStatus, pushSignal } = useStore()
   useWebSocket('signals')
 
   const [filter, setFilter]       = useState<Filter>('ALL')
   const [latency, setLatency]     = useState(0)
   const [highlight, setHighlight] = useState<string | number | null>(null)
   const prevLen = useRef(0)
+  const historyLoaded = useRef(false)
 
-  // Highlight newest signal when a new one arrives
+  // Load DB history once on mount
+  useEffect(() => {
+    if (historyLoaded.current) return
+    historyLoaded.current = true
+    api.getSignals({ limit: 200 }).then(historical => {
+      historical.forEach(s => pushSignal({
+        symbol: s.symbol,
+        zone:   s.zone,
+        score:  s.score,
+        action: s.action,
+        ts:     s.triggered_at,
+        reason: s.reason ?? undefined,
+      }))
+    }).catch(() => {})
+  }, [pushSignal])
+
+  // Highlight newest signal when a new one arrives via WS
   useEffect(() => {
     if (rawSignals.length > prevLen.current && rawSignals[0]) {
       const sig = rawSignals[0]
@@ -105,6 +123,7 @@ export default function SignalMonitor() {
     score:  s.score ?? 0,
     zone:   s.zone,
     action: s.action,
+    reason: s.reason,
   }))
 
   const filtered = filter === 'ALL' ? events : events.filter(e => e.action === filter)
