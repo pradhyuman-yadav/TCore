@@ -252,6 +252,112 @@ async def poll_stock_prices_job() -> None:
     await poll_stock_prices()
 
 
+async def refresh_news_job() -> None:
+    """30-min job: fetch news from OpenBB + RSS and upsert to news_items."""
+    import hashlib
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from app.db.models import NewsItem
+    from app.services.news_aggregator import fetch_combined_news
+
+    crypto_symbols = [
+        s["symbol"] for s in app_state.watched_symbols if s["asset_type"] == "crypto"
+    ]
+    try:
+        items = await fetch_combined_news(symbols=crypto_symbols or None, limit=100)
+        now = datetime.now(timezone.utc)
+        async with AsyncSessionLocal() as db:
+            for item in items:
+                title = (item.get("title") or "").strip()
+                if not title:
+                    continue
+                ch = hashlib.md5(title.encode()).hexdigest()
+                stmt = pg_insert(NewsItem).values(
+                    title=title,
+                    source=item.get("source"),
+                    published_at=item.get("published_at"),
+                    url=item.get("url"),
+                    summary=(item.get("summary") or "")[:500],
+                    content_hash=ch,
+                    fetched_at=now,
+                ).on_conflict_do_update(
+                    index_elements=["content_hash"],
+                    set_={"fetched_at": now, "url": item.get("url"), "summary": (item.get("summary") or "")[:500]},
+                )
+                await db.execute(stmt)
+            await db.commit()
+        log.info("news.refreshed", count=len(items))
+    except Exception as exc:
+        log.error("news.refresh_error", error=str(exc))
+
+
+async def refresh_social_job() -> None:
+    """15-min job: fetch social posts (Reddit + RSS) and upsert to social_posts."""
+    import hashlib
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from app.db.models import SocialPost
+    from app.services.social_aggregator import fetch_reddit_posts, fetch_rss_posts
+
+    now = datetime.now(timezone.utc)
+    try:
+        async with AsyncSessionLocal() as db:
+            # Reddit: all three categories
+            for category in ("crypto", "us_stock", "indian_stock"):
+                posts = await fetch_reddit_posts(category=category, limit_per_sub=20)
+                for item in posts:
+                    title = (item.get("title") or "").strip()
+                    if not title:
+                        continue
+                    url = item.get("url")
+                    ch = hashlib.md5((url or title).encode()).hexdigest()
+                    pub = item.get("published_at")
+                    stmt = pg_insert(SocialPost).values(
+                        platform="reddit",
+                        source=item.get("source"),
+                        title=title,
+                        url=url,
+                        upvotes=item.get("score", 0),
+                        comments=item.get("comments", 0),
+                        published_at=pub,
+                        content_hash=ch,
+                        fetched_at=now,
+                    ).on_conflict_do_update(
+                        index_elements=["content_hash"],
+                        set_={"upvotes": item.get("score", 0), "comments": item.get("comments", 0), "fetched_at": now},
+                    )
+                    await db.execute(stmt)
+
+            # RSS: crypto + stock feeds
+            for feed_category in ("crypto", "us_stock"):
+                rss_posts = await fetch_rss_posts(category=feed_category)
+                for item in rss_posts:
+                    title = (item.get("title") or "").strip()
+                    if not title:
+                        continue
+                    url = item.get("url")
+                    ch = hashlib.md5((url or title).encode()).hexdigest()
+                    pub = item.get("published_at")
+                    stmt = pg_insert(SocialPost).values(
+                        platform="rss",
+                        source=item.get("source"),
+                        title=title,
+                        url=url,
+                        upvotes=0,
+                        comments=0,
+                        published_at=pub,
+                        content_hash=ch,
+                        fetched_at=now,
+                    ).on_conflict_do_update(
+                        index_elements=["content_hash"],
+                        set_={"fetched_at": now},
+                    )
+                    await db.execute(stmt)
+
+            await db.commit()
+        log.info("social.refreshed")
+    except Exception as exc:
+        log.error("social.refresh_error", error=str(exc))
+
+
 def setup_scheduler(scheduler: AsyncIOScheduler) -> None:
     cadence = _DEFAULT_CADENCE
     strategy = app_state.active_strategy
@@ -284,6 +390,26 @@ def setup_scheduler(scheduler: AsyncIOScheduler) -> None:
         id="stock_prices",
         replace_existing=True,
         misfire_grace_time=60,
+    )
+
+    scheduler.add_job(
+        refresh_news_job,
+        trigger="interval",
+        minutes=30,
+        id="news_refresh",
+        replace_existing=True,
+        next_run_time=datetime.now(timezone.utc),  # run immediately on startup
+        misfire_grace_time=300,
+    )
+
+    scheduler.add_job(
+        refresh_social_job,
+        trigger="interval",
+        minutes=15,
+        id="social_refresh",
+        replace_existing=True,
+        next_run_time=datetime.now(timezone.utc),  # run immediately on startup
+        misfire_grace_time=180,
     )
 
     log.info("scheduler.job_registered", cadence_seconds=cadence)

@@ -27,7 +27,7 @@ export default function News() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await api.getNews(undefined, 80)
+      const data = await api.getNews(80)
       setArticles(data)
       setLastRefresh(new Date())
     } catch { /* ignore */ }

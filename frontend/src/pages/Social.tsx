@@ -45,7 +45,7 @@ export default function Social() {
     setLoading(true)
     setError(null)
     try {
-      const data = await api.getSocial(source, category, TWITTER_QUERIES[category], 40)
+      const data = await api.getSocial(source, 40)
       setPosts(data)
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Failed to load'

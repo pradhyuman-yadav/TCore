@@ -98,15 +98,13 @@ export const api = {
   },
 
   // News
-  getNews: (symbols?: string[], limit = 50, refresh = false) => {
-    const params = new URLSearchParams({ limit: String(limit), refresh: String(refresh) })
-    if (symbols?.length) params.set('symbols', symbols.join(','))
-    return req<NewsArticle[]>(`/news?${params}`)
-  },
+  getNews: (limit = 50) => req<NewsArticle[]>(`/news?limit=${limit}`),
+  refreshNews: () => req<{ status: string }>('/news/refresh', { method: 'POST' }),
 
   // Social
-  getSocial: (source: 'reddit' | 'twitter' | 'rss', category = 'crypto', query = 'bitcoin OR crypto', limit = 30, refresh = false) =>
-    req<SocialPost[]>(`/social?source=${source}&category=${category}&query=${encodeURIComponent(query)}&limit=${limit}&refresh=${refresh}`),
+  getSocial: (source: 'reddit' | 'twitter' | 'rss', limit = 30) =>
+    req<SocialPost[]>(`/social?source=${source}&limit=${limit}`),
+  refreshSocial: () => req<{ status: string }>('/social/refresh', { method: 'POST' }),
 }
 
 // Types
