@@ -359,6 +359,9 @@ async def refresh_social_job() -> None:
 
 
 def setup_scheduler(scheduler: AsyncIOScheduler) -> None:
+    import os
+    _in_test = bool(os.getenv("PYTEST_CURRENT_TEST"))
+
     cadence = _DEFAULT_CADENCE
     strategy = app_state.active_strategy
     if strategy:
@@ -398,7 +401,7 @@ def setup_scheduler(scheduler: AsyncIOScheduler) -> None:
         minutes=30,
         id="news_refresh",
         replace_existing=True,
-        next_run_time=datetime.now(timezone.utc),  # run immediately on startup
+        next_run_time=None if _in_test else datetime.now(timezone.utc),
         misfire_grace_time=300,
     )
 
@@ -408,7 +411,7 @@ def setup_scheduler(scheduler: AsyncIOScheduler) -> None:
         minutes=15,
         id="social_refresh",
         replace_existing=True,
-        next_run_time=datetime.now(timezone.utc),  # run immediately on startup
+        next_run_time=None if _in_test else datetime.now(timezone.utc),
         misfire_grace_time=180,
     )
 
