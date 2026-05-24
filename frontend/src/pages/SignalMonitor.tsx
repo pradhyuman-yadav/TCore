@@ -50,7 +50,7 @@ function SignalRow({ signal, highlight }: { signal: SignalEvent; highlight: bool
       <div style={{ padding: '9px 14px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
           <span style={{ color: col, fontFamily: TC.fontMono, fontSize: 11, fontWeight: 600 }}>
-            {score >= 0 ? '+' : ''}{score.toFixed(3)}
+            {(score ?? 0) >= 0 ? '+' : ''}{(score ?? 0).toFixed(3)}
           </span>
           <span style={{ color: TC.textMuted, fontFamily: TC.fontMono, fontSize: 9 }}>{zone}</span>
         </div>
@@ -102,7 +102,7 @@ export default function SignalMonitor() {
     id:     s.ts ?? i,
     ts:     s.ts ? new Date(s.ts) : new Date(),
     symbol: s.symbol,
-    score:  s.score,
+    score:  s.score ?? 0,
     zone:   s.zone,
     action: s.action,
   }))
