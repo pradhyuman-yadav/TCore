@@ -109,12 +109,19 @@ export const api = {
   },
 
   // News
-  getNews: (limit = 50) => req<NewsArticle[]>(`/news?limit=${limit}`),
+  getNews: (limit = 50, category?: string) => {
+    const p = new URLSearchParams({ limit: String(limit) })
+    if (category) p.set('category', category)
+    return req<NewsArticle[]>(`/news?${p}`)
+  },
   refreshNews: () => req<{ status: string }>('/news/refresh', { method: 'POST' }),
 
   // Social
-  getSocial: (source: 'reddit' | 'twitter' | 'rss', limit = 30) =>
-    req<SocialPost[]>(`/social?source=${source}&limit=${limit}`),
+  getSocial: (source: 'reddit' | 'twitter' | 'rss', limit = 30, category?: string) => {
+    const p = new URLSearchParams({ source, limit: String(limit) })
+    if (category) p.set('category', category)
+    return req<SocialPost[]>(`/social?${p}`)
+  },
   refreshSocial: () => req<{ status: string }>('/social/refresh', { method: 'POST' }),
 }
 
@@ -229,6 +236,7 @@ export interface NewsArticle {
   published_at: string | null
   url: string | null
   summary: string
+  category: string | null
 }
 
 export interface ClaudeHealth {
@@ -248,6 +256,7 @@ export interface SocialPost {
   comments: number
   published_at: string | null
   platform: string
+  category: string | null
 }
 
 export interface FeedSource {

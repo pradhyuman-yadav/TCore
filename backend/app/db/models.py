@@ -192,6 +192,7 @@ class NewsItem(Base):
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     url: Mapped[str | None] = mapped_column(Text)
     summary: Mapped[str | None] = mapped_column(Text)
+    category: Mapped[str | None] = mapped_column(Text)   # crypto | stock
     content_hash: Mapped[str | None] = mapped_column(Text, unique=True)
     fetched_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default="NOW()"
@@ -211,6 +212,7 @@ class SocialPost(Base):
     upvotes: Mapped[int | None] = mapped_column(Integer, server_default="0")
     comments: Mapped[int | None] = mapped_column(Integer, server_default="0")
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    category: Mapped[str | None] = mapped_column(Text)   # crypto | us_stock | indian_stock
     content_hash: Mapped[str | None] = mapped_column(Text, unique=True)
     fetched_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default="NOW()"

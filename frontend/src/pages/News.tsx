@@ -121,24 +121,32 @@ function SourcesPanel({ onClose }: { onClose: () => void }) {
   )
 }
 
+const CAT_TABS = [
+  { id: '',       label: 'All'    },
+  { id: 'crypto', label: 'Crypto' },
+  { id: 'stock',  label: 'Stocks' },
+]
+
 export default function News() {
   const [articles, setArticles]   = useState<NewsArticle[]>([])
   const [loading, setLoading]     = useState(true)
-  const [filter, setFilter]       = useState('All')
-  const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
-  const [showSources, setShowSources] = useState(false)
+  const [category, setCategory]   = useState('')
+  const [sourceFilter, setSourceFilter] = useState('All')
+  const [lastRefresh, setLastRefresh]   = useState<Date | null>(null)
+  const [showSources, setShowSources]   = useState(false)
 
-  const SOURCES = ['All', 'CoinDesk', 'CoinTelegraph', 'Decrypt', 'Reuters', 'ET Markets', 'OpenBB']
+  // Derive unique sources from loaded articles for the source sub-filter
+  const knownSources = ['All', ...Array.from(new Set(articles.map(a => a.source).filter(Boolean)))]
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await api.getNews(80)
+      const data = await api.getNews(100, category || undefined)
       setArticles(data)
       setLastRefresh(new Date())
     } catch { /* ignore */ }
     setLoading(false)
-  }, [])
+  }, [category])
 
   useEffect(() => { load() }, [load])
 
@@ -147,9 +155,10 @@ export default function News() {
     return () => clearInterval(id)
   }, [load])
 
-  const filtered = filter === 'All'
+  // Source sub-filter applied client-side on top of category
+  const filtered = sourceFilter === 'All'
     ? articles
-    : articles.filter(a => a.source.toLowerCase().includes(filter.toLowerCase()))
+    : articles.filter(a => a.source?.toLowerCase().includes(sourceFilter.toLowerCase()))
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
@@ -162,14 +171,27 @@ export default function News() {
       }}>
         <span style={{ color: TC.text, fontFamily: TC.fontMono, fontSize: 13, fontWeight: 700 }}>News Feed</span>
         <div style={{ width: 1, height: 18, background: TC.border }}/>
-        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-          {SOURCES.map(s => (
-            <button key={s} onClick={() => setFilter(s)} style={{
-              padding: '3px 10px', borderRadius: 5, cursor: 'pointer',
-              border: `1px solid ${filter === s ? TC.accent : TC.border}`,
-              background: filter === s ? TC.accentDim : 'transparent',
-              color: filter === s ? TC.accent : TC.textMid,
-              fontFamily: TC.fontMono, fontSize: 10.5, fontWeight: filter === s ? 700 : 400,
+        {/* Category tabs */}
+        <div style={{ display: 'flex', gap: 3 }}>
+          {CAT_TABS.map(t => (
+            <button key={t.id} onClick={() => { setCategory(t.id); setSourceFilter('All') }} style={{
+              padding: '4px 12px', borderRadius: 5, cursor: 'pointer',
+              border: `1px solid ${category === t.id ? TC.accent : TC.border}`,
+              background: category === t.id ? TC.accentDim : 'transparent',
+              color: category === t.id ? TC.accent : TC.textMid,
+              fontFamily: TC.fontMono, fontSize: 11, fontWeight: category === t.id ? 700 : 400,
+            }}>{t.label}</button>
+          ))}
+        </div>
+        <div style={{ width: 1, height: 18, background: TC.border }}/>
+        {/* Source sub-filter */}
+        <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+          {knownSources.slice(0, 8).map(s => (
+            <button key={s} onClick={() => setSourceFilter(s)} style={{
+              padding: '3px 9px', borderRadius: 4, cursor: 'pointer', border: 'none',
+              background: sourceFilter === s ? TC.surface3 : 'transparent',
+              color: sourceFilter === s ? TC.text : TC.textMuted,
+              fontFamily: TC.fontMono, fontSize: 10,
             }}>{s}</button>
           ))}
         </div>

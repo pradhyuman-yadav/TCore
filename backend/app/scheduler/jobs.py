@@ -255,14 +255,27 @@ async def poll_stock_prices_job() -> None:
 async def refresh_news_job() -> None:
     """30-min job: fetch news from OpenBB + RSS and upsert to news_items."""
     import hashlib
+    from sqlalchemy import select
     from sqlalchemy.dialects.postgresql import insert as pg_insert
-    from app.db.models import NewsItem
+    from app.db.models import FeedSource, NewsItem
     from app.services.news_aggregator import fetch_combined_news
 
     crypto_symbols = [
         s["symbol"] for s in app_state.watched_symbols if s["asset_type"] == "crypto"
     ]
     try:
+        # Build source_name → category map from DB
+        source_category: dict[str, str] = {}
+        async with AsyncSessionLocal() as db:
+            feed_rows = (await db.execute(
+                select(FeedSource).where(FeedSource.type == "rss_news", FeedSource.is_active == True)
+            )).scalars().all()
+            for r in feed_rows:
+                if r.category:
+                    source_category[r.name.lower()] = r.category
+        # OpenBB items are always crypto-focused
+        source_category["openbb"] = "crypto"
+
         items = await fetch_combined_news(symbols=crypto_symbols or None, limit=100)
         now = datetime.now(timezone.utc)
         async with AsyncSessionLocal() as db:
@@ -271,17 +284,28 @@ async def refresh_news_job() -> None:
                 if not title:
                     continue
                 ch = hashlib.md5(title.encode()).hexdigest()
+                src = (item.get("source") or "").lower()
+                category = next(
+                    (v for k, v in source_category.items() if k in src or src in k),
+                    None
+                )
                 stmt = pg_insert(NewsItem).values(
                     title=title,
                     source=item.get("source"),
                     published_at=item.get("published_at"),
                     url=item.get("url"),
                     summary=(item.get("summary") or "")[:500],
+                    category=category,
                     content_hash=ch,
                     fetched_at=now,
                 ).on_conflict_do_update(
                     index_elements=["content_hash"],
-                    set_={"fetched_at": now, "url": item.get("url"), "summary": (item.get("summary") or "")[:500]},
+                    set_={
+                        "fetched_at": now,
+                        "url": item.get("url"),
+                        "summary": (item.get("summary") or "")[:500],
+                        "category": category,
+                    },
                 )
                 await db.execute(stmt)
             await db.commit()
@@ -301,8 +325,8 @@ async def refresh_social_job() -> None:
     try:
         async with AsyncSessionLocal() as db:
             # Reddit: all three categories
-            for category in ("crypto", "us_stock", "indian_stock"):
-                posts = await fetch_reddit_posts(category=category, limit_per_sub=20)
+            for cat in ("crypto", "us_stock", "indian_stock"):
+                posts = await fetch_reddit_posts(category=cat, limit_per_sub=20)
                 for item in posts:
                     title = (item.get("title") or "").strip()
                     if not title:
@@ -318,11 +342,12 @@ async def refresh_social_job() -> None:
                         upvotes=item.get("score", 0),
                         comments=item.get("comments", 0),
                         published_at=pub,
+                        category=cat,
                         content_hash=ch,
                         fetched_at=now,
                     ).on_conflict_do_update(
                         index_elements=["content_hash"],
-                        set_={"upvotes": item.get("score", 0), "comments": item.get("comments", 0), "fetched_at": now},
+                        set_={"upvotes": item.get("score", 0), "comments": item.get("comments", 0), "fetched_at": now, "category": cat},
                     )
                     await db.execute(stmt)
 
@@ -344,11 +369,12 @@ async def refresh_social_job() -> None:
                         upvotes=0,
                         comments=0,
                         published_at=pub,
+                        category=feed_category,
                         content_hash=ch,
                         fetched_at=now,
                     ).on_conflict_do_update(
                         index_elements=["content_hash"],
-                        set_={"fetched_at": now},
+                        set_={"fetched_at": now, "category": feed_category},
                     )
                     await db.execute(stmt)
 

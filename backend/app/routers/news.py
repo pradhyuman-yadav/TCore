@@ -17,22 +17,21 @@ def _row_to_dict(r: NewsItem) -> dict:
         "published_at": r.published_at.isoformat() if r.published_at else None,
         "url": r.url,
         "summary": r.summary or "",
+        "category": r.category,
     }
 
 
 @router.get("")
 async def get_news(
     limit: int = Query(default=50, ge=1, le=200),
+    category: str | None = Query(default=None, description="crypto | stock"),
     db: AsyncSession = Depends(get_db),
 ):
     """Return news articles from DB. Populated by the 30-min scheduler job."""
-    rows = (
-        await db.execute(
-            select(NewsItem)
-            .order_by(NewsItem.published_at.desc().nullslast())
-            .limit(limit)
-        )
-    ).scalars().all()
+    q = select(NewsItem).order_by(NewsItem.published_at.desc().nullslast()).limit(limit)
+    if category:
+        q = q.where(NewsItem.category == category)
+    rows = (await db.execute(q)).scalars().all()
     return [_row_to_dict(r) for r in rows]
 
 

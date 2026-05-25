@@ -187,6 +187,7 @@ function SourcesPanel({ onClose }: { onClose: () => void }) {
 
 export default function Social() {
   const [source, setSource]         = useState<Source>('reddit')
+  const [category, setCategory]     = useState<Category | ''>('crypto')
   const [posts, setPosts]           = useState<SocialPost[]>([])
   const [loading, setLoading]       = useState(false)
   const [error, setError]           = useState<string | null>(null)
@@ -202,7 +203,7 @@ export default function Social() {
     setLoading(true)
     setError(null)
     try {
-      const data = await api.getSocial(source, 40)
+      const data = await api.getSocial(source, 40, category || undefined)
       setPosts(data)
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Failed to load'
@@ -214,7 +215,7 @@ export default function Social() {
       setPosts([])
     }
     setLoading(false)
-  }, [source])
+  }, [source, category])
 
   useEffect(() => { load() }, [load])
 
@@ -240,6 +241,19 @@ export default function Social() {
               color: source === s.id ? TC.accent : TC.textMid,
               fontFamily: TC.fontMono, fontSize: 11, fontWeight: source === s.id ? 700 : 400,
             }}>{s.label}</button>
+          ))}
+        </div>
+
+        <div style={{ width: 1, height: 18, background: TC.border }}/>
+        {/* Category filter */}
+        <div style={{ display: 'flex', gap: 3 }}>
+          {([{ id: '' as const, label: 'All' }, ...CATEGORIES] as { id: Category | ''; label: string }[]).map(c => (
+            <button key={c.id} onClick={() => setCategory(c.id)} style={{
+              padding: '3px 9px', borderRadius: 4, cursor: 'pointer', border: 'none',
+              background: category === c.id ? TC.surface3 : 'transparent',
+              color: category === c.id ? TC.text : TC.textMuted,
+              fontFamily: TC.fontMono, fontSize: 11,
+            }}>{c.label}</button>
           ))}
         </div>
 
