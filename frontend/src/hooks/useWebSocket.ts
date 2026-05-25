@@ -8,8 +8,10 @@ export function useWebSocket(channel: string) {
   useEffect(() => {
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
     const url = `${proto}://${window.location.host}/ws/${channel}`
+    let dead = false
 
     function connect() {
+      if (dead) return
       if (channel === 'signals') setWsStatus('connecting')
       const ws = new WebSocket(url)
       wsRef.current = ws
@@ -28,14 +30,14 @@ export function useWebSocket(channel: string) {
 
       ws.onclose = () => {
         if (channel === 'signals') setWsStatus('closed')
-        setTimeout(connect, 3000)
+        if (!dead) setTimeout(connect, 3000)
       }
 
       ws.onerror = () => ws.close()
     }
 
     connect()
-    return () => { wsRef.current?.close() }
+    return () => { dead = true; wsRef.current?.close() }
   }, [channel])
 }
 

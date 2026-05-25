@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, StrategyRow } from '../api'
+import { useStore } from '../store'
 import { TC } from '../theme'
 import { TCCard, TCBadge, TCSlider, TCInput, TCSelect } from '../components/ui'
 
@@ -9,39 +10,56 @@ const INDICATOR_LABELS: Record<string, string> = {
   ema: 'EMA Cross', volume: 'Volume Surge', sentiment: 'Sentiment',
 }
 
-const DEFAULT_CONFIG = {
+const CRYPTO_DEFAULT_CONFIG = {
   symbol: 'BTC/USDT', exchange: 'binanceus', timeframe: '15m',
   weights: { rsi: 0.25, macd: 0.20, bb: 0.15, ema: 0.20, volume: 0.10, sentiment: 0.10 },
   buy_threshold: 0.30, sell_threshold: 0.30,
   usdt_amount: 500, max_positions: 3, max_daily_loss: 150,
 }
 
-type StratConfig = typeof DEFAULT_CONFIG
+const STOCK_DEFAULT_CONFIG = {
+  symbol: 'AAPL', exchange: 'yfinance_us', timeframe: '1d',
+  weights: { rsi: 0.25, macd: 0.20, bb: 0.15, ema: 0.20, volume: 0.10, sentiment: 0.10 },
+  buy_threshold: 0.30, sell_threshold: 0.30,
+  usdt_amount: 500, max_positions: 3, max_daily_loss: 150,
+}
+
+type StratConfig = typeof CRYPTO_DEFAULT_CONFIG
 
 export default function StrategyBuilder() {
   const navigate = useNavigate()
+  const workspace = useStore(s => s.workspace)
   const [strategies,  setStrategies]  = useState<StrategyRow[]>([])
   const [selectedId,  setSelectedId]  = useState<string | null>(null)
-  const [config,      setConfig]      = useState<StratConfig>(DEFAULT_CONFIG)
+  const [config,      setConfig]      = useState<StratConfig>(
+    workspace === 'crypto' ? CRYPTO_DEFAULT_CONFIG : STOCK_DEFAULT_CONFIG
+  )
   const [name,        setName]        = useState('')
   const [saved,       setSaved]       = useState(false)
   const [activating,  setActivating]  = useState(false)
   const [deleteErr,   setDeleteErr]   = useState<string | null>(null)
 
-  useEffect(() => {
-    api.listStrategies().then(rows => {
+  const loadStrategies = () =>
+    api.listStrategies(workspace).then(rows => {
       setStrategies(rows)
       const active = rows.find(r => r.is_active)
       if (active) setSelectedId(active.id)
+      else setSelectedId(null)
     }).catch(() => {})
-  }, [])
+
+  useEffect(() => { loadStrategies() }, [workspace])
+
+  // Reset config defaults when workspace changes
+  useEffect(() => {
+    setConfig(workspace === 'crypto' ? CRYPTO_DEFAULT_CONFIG : STOCK_DEFAULT_CONFIG)
+  }, [workspace])
 
   const handleSave = async () => {
     try {
-      await api.createStrategy(name || 'My Strategy', config)
+      await api.createStrategy(name || 'My Strategy', config, workspace)
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
-      api.listStrategies().then(setStrategies).catch(() => {})
+      loadStrategies()
     } catch { /* ignore */ }
   }
 
@@ -49,8 +67,8 @@ export default function StrategyBuilder() {
     setDeleteErr(null)
     try {
       await api.deleteStrategy(id)
-      setStrategies(prev => prev.filter(s => s.id !== id))
       if (selectedId === id) setSelectedId(null)
+      loadStrategies()
     } catch (e: unknown) {
       setDeleteErr(e instanceof Error ? e.message : 'Delete failed')
       setTimeout(() => setDeleteErr(null), 4000)
@@ -81,8 +99,11 @@ export default function StrategyBuilder() {
     <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
       {/* Left: strategy list */}
       <div style={{ width: 215, flexShrink: 0, borderRight: `1px solid ${TC.border}`, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ padding: '12px 16px', borderBottom: `1px solid ${TC.border}` }}>
+        <div style={{ padding: '12px 16px', borderBottom: `1px solid ${TC.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <span style={{ color: TC.textMuted, fontSize: 9.5, fontFamily: TC.fontMono, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Saved Strategies</span>
+          <span style={{ color: workspace === 'crypto' ? TC.accent : TC.green, fontSize: 9, fontFamily: TC.fontMono, fontWeight: 700 }}>
+            {workspace === 'crypto' ? '₿ CRYPTO' : '📈 STOCKS'}
+          </span>
         </div>
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {strategies.length === 0 && (

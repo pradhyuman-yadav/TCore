@@ -28,13 +28,16 @@ interface AppStore {
   signals: Signal[]
   wsStatus: 'connecting' | 'open' | 'closed'
   latestTick: PriceTick | null
+  workspace: 'crypto' | 'stock'
 
   setKillSwitch: (v: boolean) => void
   setTradingMode: (v: string) => void
   setActiveStrategy: (s: Record<string, unknown> | null) => void
   pushSignal: (s: Signal) => void
+  clearSignals: () => void
   setWsStatus: (s: AppStore['wsStatus']) => void
   setLatestTick: (t: PriceTick) => void
+  setWorkspace: (w: 'crypto' | 'stock') => void
 }
 
 export const useStore = create<AppStore>((set) => ({
@@ -44,6 +47,7 @@ export const useStore = create<AppStore>((set) => ({
   signals: [],
   wsStatus: 'closed',
   latestTick: null,
+  workspace: 'crypto',
 
   setKillSwitch: (v) => set({ killSwitch: v }),
   setTradingMode: (v) => set({ tradingMode: v }),
@@ -54,6 +58,8 @@ export const useStore = create<AppStore>((set) => ({
       if (state.signals.some(x => `${x.symbol}|${x.ts}` === key)) return state
       return { signals: [s, ...state.signals].slice(0, 500) }
     }),
+  clearSignals: () => set({ signals: [] }),
   setWsStatus: (s) => set({ wsStatus: s }),
   setLatestTick: (t) => set({ latestTick: t }),
+  setWorkspace: (w) => set({ workspace: w }),
 }))

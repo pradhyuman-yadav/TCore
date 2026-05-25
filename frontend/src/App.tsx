@@ -13,7 +13,7 @@ import News from './pages/News'
 import Social from './pages/Social'
 
 function AppShell() {
-  const { killSwitch, tradingMode, wsStatus, setKillSwitch, setTradingMode, setActiveStrategy, activeStrategy } = useStore()
+  const { killSwitch, tradingMode, wsStatus, setKillSwitch, setTradingMode, setActiveStrategy, activeStrategy, workspace, setWorkspace } = useStore()
   const [transitioning, setTransitioning] = useState(false)
   const navigate = useNavigate()
   const location = useLocation()
@@ -60,7 +60,7 @@ function AppShell() {
       />
 
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0 }}>
-        <TCSidebar activePath={location.pathname} navigate={handleNavigate}/>
+        <TCSidebar activePath={location.pathname} navigate={handleNavigate} workspace={workspace} onWorkspaceChange={setWorkspace}/>
 
         <main style={{ flex: 1, overflow: 'auto', minWidth: 0, opacity: transitioning ? 0 : 1, transition: 'opacity 0.1s ease' }}>
           {killSwitch && <TCKillBanner/>}

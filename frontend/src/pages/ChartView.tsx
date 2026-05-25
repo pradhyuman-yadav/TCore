@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { api, WatchedSymbol, PaperAccount, PaperAccountConfig } from '../api'
+import { api, WatchedSymbol, PaperAccount, PaperAccountConfig, IndicatorRow } from '../api'
 import { TC } from '../theme'
 import { TCSectionHeader } from '../components/ui'
 import { createChart, ColorType, CrosshairMode } from 'lightweight-charts'
@@ -438,13 +438,23 @@ function TrackedSymbolsPanel({
 }
 
 // ── Indicators ────────────────────────────────────────────────────────────
-const INDICATORS = [
-  { key: 'rsi',       label: 'RSI',          weight: 0.25, value: 0.55 },
-  { key: 'macd',      label: 'MACD',         weight: 0.20, value: 0.42 },
-  { key: 'bb',        label: 'BB Position',  weight: 0.15, value: 0.68 },
-  { key: 'ema',       label: 'EMA Cross',    weight: 0.20, value: 0.60 },
-  { key: 'volume',    label: 'Volume Surge', weight: 0.10, value: 0.45 },
-  { key: 'sentiment', label: 'Sentiment',    weight: 0.10, value: 0.58 },
+const INDICATOR_LABELS: Record<string, string> = {
+  rsi:              'RSI',
+  macd_hist:        'MACD',
+  bb_position:      'BB Position',
+  ema_cross:        'EMA Cross',
+  volume_surge:     'Volume Surge',
+  news_sentiment:   'News Sentiment',
+  social_sentiment: 'Social Sentiment',
+}
+
+// Static fallback shown before the first live cycle completes
+const INDICATORS_FALLBACK = [
+  { key: 'rsi',          label: 'RSI',          weight: 0.25, value: 0 },
+  { key: 'macd_hist',    label: 'MACD',         weight: 0.20, value: 0 },
+  { key: 'bb_position',  label: 'BB Position',  weight: 0.15, value: 0 },
+  { key: 'ema_cross',    label: 'EMA Cross',    weight: 0.20, value: 0 },
+  { key: 'volume_surge', label: 'Volume Surge', weight: 0.10, value: 0 },
 ]
 
 function IndicatorBar({ label, value, weight }: { label: string; value: number; weight: number }) {
@@ -625,6 +635,7 @@ export default function ChartView() {
   const [showAccountModal, setShowAccountModal] = useState(false)
   const [latestPrices, setLatestPrices]     = useState<Record<string, number>>({})
   const [paperPnl, setPaperPnl]             = useState<number | null>(null)
+  const [liveIndicators, setLiveIndicators] = useState<IndicatorRow[]>([])
 
   // Load watchlist + paper account on mount
   useEffect(() => {
@@ -659,6 +670,20 @@ export default function ChartView() {
     connect()
     return () => { dead = true; ws?.close() }
   }, [])
+
+  // Fetch live indicator snapshot when selected symbol changes
+  useEffect(() => {
+    if (!selected) return
+    api.getLatestIndicators(selected.symbol)
+      .then(rows => { if (rows.length > 0) setLiveIndicators(rows) })
+      .catch(() => {})
+    // Refresh every 30s while on this page
+    const iv = setInterval(() => {
+      if (!selected) return
+      api.getLatestIndicators(selected.symbol).then(rows => { if (rows.length > 0) setLiveIndicators(rows) }).catch(() => {})
+    }, 30000)
+    return () => clearInterval(iv)
+  }, [selected?.symbol])
 
   const handleSelect = useCallback((sym: WatchedSymbol) => {
     setSelected(sym)
@@ -783,7 +808,7 @@ export default function ChartView() {
             ⚙ Paper
           </button>
           <span style={{ color: TC.textMuted, fontSize: 9, fontFamily: TC.fontMono, opacity: 0.6 }}>
-            Binance US · 100ms
+            {selected?.asset_type === 'crypto' ? 'Binance US · WS' : selected?.asset_type ? 'yfinance · 5m poll' : '—'}
           </span>
         </div>
       </div>
@@ -830,14 +855,26 @@ export default function ChartView() {
       {/* Bottom: Indicator snapshot */}
       <div style={{ flexShrink: 0, borderTop: `1px solid ${TC.border}`, background: TC.surface }}>
         <TCSectionHeader title="Indicator Snapshot" right={
-          <span style={{ color: TC.textMuted, fontSize: 9, fontFamily: TC.fontMono }}>
-            Last: {new Date().toTimeString().slice(0, 8)}
+          <span style={{ color: liveIndicators.length > 0 ? TC.green : TC.textMuted, fontSize: 9, fontFamily: TC.fontMono }}>
+            {liveIndicators.length > 0
+              ? `Live · ${liveIndicators[0]?.time ? new Date(liveIndicators[0].time).toLocaleTimeString() : '—'}`
+              : 'Awaiting first cycle…'}
           </span>
         }/>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)' }}>
-          {INDICATORS.map(ind => (
-            <IndicatorBar key={ind.key} label={ind.label} value={ind.value} weight={ind.weight}/>
-          ))}
+          {liveIndicators.length > 0
+            ? liveIndicators.map(ind => (
+                <IndicatorBar
+                  key={ind.indicator_name}
+                  label={INDICATOR_LABELS[ind.indicator_name] ?? ind.indicator_name}
+                  value={ind.value}
+                  weight={ind.weight}
+                />
+              ))
+            : INDICATORS_FALLBACK.map(ind => (
+                <IndicatorBar key={ind.key} label={ind.label} value={ind.value} weight={ind.weight}/>
+              ))
+          }
         </div>
       </div>
 

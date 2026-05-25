@@ -1,40 +1,42 @@
 import { useEffect, useState } from 'react'
-import { api, ClaudeHealth, Position, Trade } from '../api'
+import { api, ClaudeHealth, HealthStatus, Position, Trade } from '../api'
 import { useStore } from '../store'
 import { TC } from '../theme'
 import { TCCard, TCBadge, TCSectionHeader, TCTable, TCEmpty, ColDef } from '../components/ui'
 
-// ── Data Seed Panel ─────────────────────────────────────────────────────────
-const SEED_SYMBOLS = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT']
-const SEED_TF      = '1h'
-const SEED_DAYS    = 90
+const SEED_CONFIG: Record<string, { symbols: string[]; exchange: string; tf: string; days: number }> = {
+  crypto: { symbols: ['BTC/USDT', 'ETH/USDT', 'SOL/USDT'], exchange: 'binanceus', tf: '1h', days: 90 },
+  stock:  { symbols: ['AAPL', 'MSFT', 'GOOGL'],             exchange: 'yfinance_us', tf: '1d', days: 365 },
+}
 
-function DataSeedPanel() {
-  const [rows, setRows]         = useState<Record<string, { count: number; syncing: boolean; result: string }>>({})
+// ── Data Seed Panel ─────────────────────────────────────────────────────────
+function DataSeedPanel({ workspace }: { workspace: 'crypto' | 'stock' }) {
+  const cfg  = SEED_CONFIG[workspace]
+  const [rows, setRows] = useState<Record<string, { count: number; syncing: boolean; result: string }>>({})
 
   useEffect(() => {
-    // check counts for each symbol
-    SEED_SYMBOLS.forEach(sym => {
-      api.getOhlcvCount(sym, 'binance').then(r => {
+    setRows({})
+    cfg.symbols.forEach(sym => {
+      api.getOhlcvCount(sym, cfg.exchange).then(r => {
         setRows(prev => ({ ...prev, [sym]: { count: r.count, syncing: false, result: '' } }))
       }).catch(() => {
         setRows(prev => ({ ...prev, [sym]: { count: 0, syncing: false, result: '' } }))
       })
     })
-  }, [])
+  }, [workspace])
 
   const sync = async (sym: string) => {
     setRows(prev => ({ ...prev, [sym]: { ...prev[sym], syncing: true, result: '' } }))
     try {
-      const r = await api.syncMarket(sym, 'binance', SEED_TF, SEED_DAYS)
+      const r = await api.syncMarket(sym, cfg.exchange, cfg.tf, cfg.days)
       setRows(prev => ({ ...prev, [sym]: { count: r.upserted, syncing: false, result: `✓ ${r.upserted} bars` } }))
     } catch (e: unknown) {
       setRows(prev => ({ ...prev, [sym]: { ...prev[sym], syncing: false, result: `✗ ${e instanceof Error ? e.message : 'failed'}` } }))
     }
   }
 
-  const syncAll = () => SEED_SYMBOLS.forEach(sync)
-  const anyMissing = SEED_SYMBOLS.some(s => (rows[s]?.count ?? 0) === 0)
+  const syncAll = () => cfg.symbols.forEach(sync)
+  const anyMissing = cfg.symbols.some(s => (rows[s]?.count ?? 0) === 0)
 
   return (
     <TCCard>
@@ -44,7 +46,7 @@ function DataSeedPanel() {
           border: `1px solid ${TC.accent}`, background: TC.accentDim,
           color: TC.accent, fontFamily: TC.fontMono, fontSize: 10, fontWeight: 700,
         }}>
-          Sync All ({SEED_DAYS}d)
+          Sync All ({cfg.days}d)
         </button>
       }/>
       {anyMissing && (
@@ -55,7 +57,7 @@ function DataSeedPanel() {
         </div>
       )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)' }}>
-        {SEED_SYMBOLS.map(sym => {
+        {cfg.symbols.map(sym => {
           const row = rows[sym]
           const hasData = (row?.count ?? 0) > 0
           return (
@@ -65,7 +67,7 @@ function DataSeedPanel() {
                 <TCBadge variant={hasData ? 'buy' : 'sell'}>{hasData ? 'OK' : 'EMPTY'}</TCBadge>
               </div>
               <div style={{ color: TC.textMuted, fontFamily: TC.fontMono, fontSize: 10, marginBottom: 8 }}>
-                {row === undefined ? '…' : `${row.count.toLocaleString()} bars · ${SEED_TF}`}
+                {row === undefined ? '…' : `${row.count.toLocaleString()} bars · ${cfg.tf}`}
               </div>
               <button onClick={() => sync(sym)} disabled={row?.syncing} style={{
                 width: '100%', padding: '5px 0', borderRadius: 4, cursor: row?.syncing ? 'not-allowed' : 'pointer',
@@ -73,7 +75,7 @@ function DataSeedPanel() {
                 color: row?.syncing ? TC.textMuted : TC.accent, fontFamily: TC.fontMono, fontSize: 10, fontWeight: 700,
                 transition: 'all 0.15s',
               }}>
-                {row?.syncing ? '⟳ Syncing…' : `⟳ Sync ${SEED_DAYS}d`}
+                {row?.syncing ? '⟳ Syncing…' : `⟳ Sync ${cfg.days}d`}
               </button>
               {row?.result && (
                 <div style={{ marginTop: 4, color: row.result.startsWith('✓') ? TC.green : TC.red, fontSize: 9, fontFamily: TC.fontMono }}>
@@ -242,11 +244,10 @@ function ClaudeCard() {
 
 // ── Dashboard ───────────────────────────────────────────────────────────────
 export default function Dashboard() {
-  const { killSwitch, tradingMode, activeStrategy } = useStore()
-  const [positions, setPositions] = useState<Position[]>([])
-  const [trades, setTrades]       = useState<Trade[]>([])
-  const [tick, setTick]           = useState(0)
-  const [score] = useState(0.67)
+  const { killSwitch, tradingMode, activeStrategy, signals, workspace } = useStore()
+  const [positions, setPositions]   = useState<Position[]>([])
+  const [trades, setTrades]         = useState<Trade[]>([])
+  const [health, setHealth]         = useState<HealthStatus | null>(null)
 
   useEffect(() => {
     const load = tradingMode === 'live' ? api.livePositions : api.paperPositions
@@ -255,12 +256,20 @@ export default function Dashboard() {
     loadTrades(20).then(setTrades).catch(() => {})
   }, [tradingMode])
 
+  // Poll /health every 15s to get real DB + scheduler status
   useEffect(() => {
-    const iv = setInterval(() => setTick(t => t + 1), 2500)
+    const check = () => api.health().then(setHealth).catch(() => setHealth(null))
+    check()
+    const iv = setInterval(check, 15000)
     return () => clearInterval(iv)
   }, [])
 
   const dailyPnl = trades.reduce((sum, t) => sum + (t.pnl ?? 0), 0)
+
+  // Live composite score from most recent signal in store
+  const liveScore = signals.length > 0 ? (signals[0].score ?? 0) : 0
+  const scoreSymbol = (activeStrategy?.symbol as string)
+    ?? (workspace === 'crypto' ? 'BTC/USDT' : 'AAPL')
 
   const posColumns: ColDef<Position>[] = [
     { key: 'symbol', label: 'Symbol', mono: true },
@@ -281,14 +290,19 @@ export default function Dashboard() {
     )},
   ]
 
-  const stratName = (activeStrategy?.name as string) ?? 'None'
+  const stratName  = (activeStrategy?.name as string) ?? 'None'
+  const dbStatus   = health?.db === 'connected' ? 'ok' : health === null ? 'warn' : 'error'
+  const schStatus  = health?.scheduler === 'running' ? 'ok' : health === null ? 'warn' : 'error'
+  const dbLabel    = health ? (health.db === 'connected' ? 'Connected' : 'Disconnected') : '…'
+  const schLabel   = health ? (health.scheduler === 'running' ? 'Running' : 'Stopped') : '…'
+  const schSub     = health?.active_strategy ? `Strategy: ${health.active_strategy}` : 'No active strategy'
 
   return (
     <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
       {/* Status cards */}
       <div style={{ display: 'flex', gap: 12 }}>
-        <StatusCard label="Database"        value="Connected"                        sub="PostgreSQL / TimescaleDB"                    status="ok"/>
-        <StatusCard label="Scheduler"       value="Running"                          sub={`Cycle ${tick}`}                             status="ok"/>
+        <StatusCard label="Database"        value={dbLabel}                          sub="PostgreSQL / TimescaleDB"                    status={dbStatus as 'ok' | 'warn' | 'error'}/>
+        <StatusCard label="Scheduler"       value={schLabel}                         sub={schSub}                                      status={schStatus as 'ok' | 'warn' | 'error'}/>
         <StatusCard label="Kill Switch"     value={killSwitch ? 'ACTIVE' : 'Off'}    sub={killSwitch ? 'Trading halted' : 'Enabled'}   status={killSwitch ? 'error' : 'ok'}/>
         <StatusCard label="Active Strategy" value={stratName}                        sub={tradingMode.toUpperCase()}                   status={stratName === 'None' ? 'warn' : 'ok'}/>
         <ClaudeCard/>
@@ -307,7 +321,7 @@ export default function Dashboard() {
       </div>
 
       {/* Data seed panel */}
-      <DataSeedPanel/>
+      <DataSeedPanel workspace={workspace}/>
 
       {/* PnL + Score */}
       <div style={{ display: 'flex', gap: 12 }}>
@@ -319,10 +333,12 @@ export default function Dashboard() {
         </TCCard>
         <TCCard style={{ flex: 1 }}>
           <TCSectionHeader title="Composite Score" right={
-            <span style={{ color: TC.textMuted, fontSize: 9, fontFamily: TC.fontMono }}>{(activeStrategy?.symbol as string) ?? 'BTC/USDT'} · 15m</span>
+            <span style={{ color: TC.textMuted, fontSize: 9, fontFamily: TC.fontMono }}>
+              {scoreSymbol} · {signals.length > 0 ? 'live' : 'no data'}
+            </span>
           }/>
           <div style={{ padding: '14px 12px' }}>
-            <ScoreGauge score={score}/>
+            <ScoreGauge score={liveScore}/>
           </div>
         </TCCard>
       </div>

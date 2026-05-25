@@ -78,7 +78,7 @@ function SignalRow({ signal, highlight }: { signal: SignalEvent; highlight: bool
 }
 
 export default function SignalMonitor() {
-  const { signals: rawSignals, wsStatus, pushSignal } = useStore()
+  const { signals: rawSignals, wsStatus, pushSignal, clearSignals, workspace } = useStore()
   useWebSocket('signals')
 
   const [filter, setFilter]       = useState<Filter>('ALL')
@@ -87,11 +87,17 @@ export default function SignalMonitor() {
   const prevLen = useRef(0)
   const historyLoaded = useRef(false)
 
-  // Load DB history once on mount
+  // Clear and reload when workspace changes
+  useEffect(() => {
+    clearSignals()
+    historyLoaded.current = false
+  }, [workspace])
+
+  // Load DB history on mount and on workspace change
   useEffect(() => {
     if (historyLoaded.current) return
     historyLoaded.current = true
-    api.getSignals({ limit: 200 }).then(historical => {
+    api.getSignals({ limit: 200, asset_type: workspace }).then(historical => {
       historical.forEach(s => pushSignal({
         symbol: s.symbol,
         zone:   s.zone,
@@ -101,7 +107,7 @@ export default function SignalMonitor() {
         reason: s.reason ?? undefined,
       }))
     }).catch(() => {})
-  }, [pushSignal])
+  }, [pushSignal, workspace])
 
   // Highlight newest signal when a new one arrives via WS
   useEffect(() => {
@@ -150,8 +156,13 @@ export default function SignalMonitor() {
             <span style={{ fontFamily: TC.fontMono, fontSize: 11, color: latency < 30 ? TC.green : latency < 60 ? TC.yellow : TC.red }}>{latency}ms</span>
           </>
         )}
-        <div style={{ marginLeft: 'auto', color: TC.textMuted, fontSize: 10, fontFamily: TC.fontMono }}>
-          {events.length} events{events[0] && ` · newest: ${fmtTime(events[0].ts)}`}
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span style={{ color: workspace === 'crypto' ? TC.accent : TC.green, fontFamily: TC.fontMono, fontSize: 10, fontWeight: 700 }}>
+            {workspace === 'crypto' ? '₿ CRYPTO' : '📈 STOCKS'}
+          </span>
+          <span style={{ color: TC.textMuted, fontSize: 10, fontFamily: TC.fontMono }}>
+            {events.length} events{events[0] && ` · newest: ${fmtTime(events[0].ts)}`}
+          </span>
         </div>
       </div>
 

@@ -168,7 +168,8 @@ async def run_backtest_endpoint(
         )
 
     # Cap to most recent MAX_BARS to prevent O(n²) timeout
-    if len(rows) > MAX_BARS:
+    raw_count = len(rows)
+    if raw_count > MAX_BARS:
         rows = rows[-MAX_BARS:]
 
     df = pd.DataFrame(
@@ -194,5 +195,5 @@ async def run_backtest_endpoint(
     )
     out = result.to_dict()
     out["bars_used"] = len(df)
-    out["bars_capped"] = len(rows) >= MAX_BARS  # true if we truncated
+    out["bars_capped"] = raw_count > MAX_BARS  # true only if we actually truncated
     return out

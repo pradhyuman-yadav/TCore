@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { api, NewsArticle, FeedSource } from '../api'
+import { useStore } from '../store'
 import { TC } from '../theme'
 import { TCBadge, TCSectionHeader } from '../components/ui'
 
@@ -128,12 +129,19 @@ const CAT_TABS = [
 ]
 
 export default function News() {
+  const workspace = useStore(s => s.workspace)
   const [articles, setArticles]   = useState<NewsArticle[]>([])
   const [loading, setLoading]     = useState(true)
-  const [category, setCategory]   = useState('')
+  const [category, setCategory]   = useState<string>(() => workspace === 'crypto' ? 'crypto' : 'stock')
   const [sourceFilter, setSourceFilter] = useState('All')
   const [lastRefresh, setLastRefresh]   = useState<Date | null>(null)
   const [showSources, setShowSources]   = useState(false)
+
+  // Sync category with workspace when workspace changes
+  useEffect(() => {
+    setCategory(workspace === 'crypto' ? 'crypto' : 'stock')
+    setSourceFilter('All')
+  }, [workspace])
 
   // Derive unique sources from loaded articles for the source sub-filter
   const knownSources = ['All', ...Array.from(new Set(articles.map(a => a.source).filter(Boolean)))]

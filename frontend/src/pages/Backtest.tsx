@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { createChart, IChartApi, Time } from 'lightweight-charts'
 import { api, BacktestResult, BacktestTrade, StrategyDetail, StrategyRow } from '../api'
+import { useStore } from '../store'
 import { TC } from '../theme'
 import { TCCard, TCBadge, TCSectionHeader, TCTable, ColDef } from '../components/ui'
 
@@ -74,8 +75,14 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   )
 }
 
+const WORKSPACE_DEFAULTS = {
+  crypto: { symbol: 'BTC/USDT', exchange: 'binanceus', timeframe: '1h' },
+  stock:  { symbol: 'AAPL',     exchange: 'yfinance_us', timeframe: '1d' },
+}
+
 export default function Backtest() {
-  const location = useLocation()
+  const location  = useLocation()
+  const workspace = useStore(s => s.workspace)
 
   // Strategy picker
   const [strategies,      setStrategies]      = useState<StrategyRow[]>([])
@@ -83,10 +90,10 @@ export default function Backtest() {
   const [stratDetail,     setStratDetail]     = useState<StrategyDetail | null>(null)
   const [loadingStrat,    setLoadingStrat]    = useState(false)
 
-  // Run params
-  const [symbol,    setSymbol]    = useState('BTC/USDT')
-  const [exchange,  setExchange]  = useState('binanceus')
-  const [timeframe, setTimeframe] = useState('1h')
+  // Run params — initialized from workspace defaults
+  const [symbol,    setSymbol]    = useState(WORKSPACE_DEFAULTS[workspace].symbol)
+  const [exchange,  setExchange]  = useState(WORKSPACE_DEFAULTS[workspace].exchange)
+  const [timeframe, setTimeframe] = useState(WORKSPACE_DEFAULTS[workspace].timeframe)
   const [dateFrom,  setDateFrom]  = useState('')
   const [dateTo,    setDateTo]    = useState('')
   const [capital,   setCapital]   = useState(10000)
@@ -99,16 +106,27 @@ export default function Backtest() {
   const [error,   setError]   = useState<string | null>(null)
   const [warning, setWarning] = useState<string | null>(null)
 
-  // Load strategies on mount
+  // Reset defaults when workspace changes (only if user hasn't manually edited)
   useEffect(() => {
-    api.listStrategies().then(rows => {
+    const d = WORKSPACE_DEFAULTS[workspace]
+    setSymbol(d.symbol)
+    setExchange(d.exchange)
+    setTimeframe(d.timeframe)
+    setSelectedStrat('')
+    setStratDetail(null)
+    setResult(null)
+  }, [workspace])
+
+  // Load strategies filtered by workspace
+  useEffect(() => {
+    api.listStrategies(workspace).then(rows => {
       setStrategies(rows)
       // Check if navigated from StrategyBuilder with a strategy ID
       const params = new URLSearchParams(location.search)
       const preselect = params.get('strategy') ?? rows.find(r => r.is_active)?.id ?? ''
       if (preselect) setSelectedStrat(preselect)
     }).catch(() => {})
-  }, [location.search])
+  }, [location.search, workspace])
 
   // Fetch full config when strategy changes
   useEffect(() => {
@@ -185,7 +203,12 @@ export default function Backtest() {
         {/* Row 1: Strategy picker */}
         <div style={{ marginBottom: 14, display: 'flex', alignItems: 'flex-end', gap: 12 }}>
           <div style={{ flex: 1 }}>
-            <div style={labelStyle}>Strategy</div>
+            <div style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span>Strategy</span>
+              <span style={{ color: workspace === 'crypto' ? TC.accent : TC.green, fontSize: 9, fontFamily: TC.fontMono, fontWeight: 700 }}>
+                {workspace === 'crypto' ? '₿ CRYPTO' : '📈 STOCKS'}
+              </span>
+            </div>
             <select
               value={selectedStrat}
               onChange={e => setSelectedStrat(e.target.value)}

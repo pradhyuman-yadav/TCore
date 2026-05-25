@@ -30,7 +30,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   // Health
-  health: () => req<Record<string, unknown>>('/health'),
+  health: () => req<HealthStatus>('/health'),
 
   // Control
   getControl: () => req<{ kill_switch: boolean; trading_mode: string }>('/control'),
@@ -51,10 +51,13 @@ export const api = {
     ),
 
   // Strategy
-  listStrategies: () => req<StrategyRow[]>('/strategy'),
+  listStrategies: (assetType?: string) => {
+    const p = assetType ? `?asset_type=${assetType}` : ''
+    return req<StrategyRow[]>(`/strategy${p}`)
+  },
   getActiveStrategy: () => req<Record<string, unknown>>('/strategy/active'),
-  createStrategy: (name: string, config: Record<string, unknown>) =>
-    req('/strategy', { method: 'POST', body: JSON.stringify({ name, config }) }),
+  createStrategy: (name: string, config: Record<string, unknown>, assetType?: string) =>
+    req('/strategy', { method: 'POST', body: JSON.stringify({ name, config, asset_type: assetType }) }),
   activateStrategy: (id: string) =>
     req(`/strategy/${id}/activate`, { method: 'POST' }),
   deleteStrategy: (id: string) =>
@@ -101,10 +104,15 @@ export const api = {
     req<FeedSource>('/sources/social', { method: 'POST', body: JSON.stringify(body) }),
   removeSocialSource:(id: string) => req(`/sources/social/${id}`, { method: 'DELETE' }),
 
+  // Indicators
+  getLatestIndicators: (symbol: string) =>
+    req<IndicatorRow[]>(`/signals/indicators?symbol=${encodeURIComponent(symbol)}`),
+
   // Signals history
-  getSignals: (params?: { limit?: number; symbol?: string }) => {
+  getSignals: (params?: { limit?: number; symbol?: string; asset_type?: string }) => {
     const p = new URLSearchParams({ limit: String(params?.limit ?? 200) })
     if (params?.symbol) p.set('symbol', params.symbol)
+    if (params?.asset_type) p.set('asset_type', params.asset_type)
     return req<StoredSignal[]>(`/signals?${p}`)
   },
 
@@ -141,6 +149,7 @@ export interface StrategyRow {
   id: string
   name: string
   is_active: boolean
+  asset_type: string | null
   created_at: string | null
 }
 
@@ -267,6 +276,25 @@ export interface FeedSource {
   category: string | null
   is_active: boolean
   added_at: string | null
+}
+
+export interface IndicatorRow {
+  indicator_name: string
+  value: number
+  weight: number
+  weighted_value: number
+  time: string | null
+}
+
+export interface HealthStatus {
+  status: string
+  version: string
+  db: 'connected' | 'disconnected'
+  scheduler: 'running' | 'stopped'
+  trading_mode: string
+  kill_switch: boolean
+  active_strategy: string | null
+  ws_connections: Record<string, number>
 }
 
 export interface StoredSignal {

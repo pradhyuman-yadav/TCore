@@ -407,29 +407,61 @@ const NAV_ITEMS = [
   { id: '/social',   label: 'Social',            Icon: TCIcons.Social    },
 ]
 
-export const TCSidebar = ({ activePath, navigate }: { activePath: string; navigate: (p: string) => void }) => (
+interface SidebarProps {
+  activePath: string
+  navigate: (p: string) => void
+  workspace: 'crypto' | 'stock'
+  onWorkspaceChange: (w: 'crypto' | 'stock') => void
+}
+
+export const TCSidebar = ({ activePath, navigate, workspace, onWorkspaceChange }: SidebarProps) => (
   <aside style={{
     width: 210, flexShrink: 0,
     background: TC.surface,
     borderRight: `1px solid ${TC.border}`,
-    padding: '10px 0', display: 'flex', flexDirection: 'column', gap: 2,
+    display: 'flex', flexDirection: 'column',
   }}>
-    {NAV_ITEMS.map(({ id, label, Icon }) => {
-      const on = activePath === id
-      return (
-        <button key={id} onClick={() => navigate(id)} style={{
-          display: 'flex', alignItems: 'center', gap: 10,
-          padding: '10px 18px', border: 'none', cursor: 'pointer', width: '100%', textAlign: 'left',
-          background: on ? 'rgba(0,212,255,0.07)' : 'transparent',
-          color: on ? TC.accent : TC.textMid,
-          fontFamily: TC.fontUI, fontSize: 12.5, fontWeight: on ? 600 : 400,
-          borderLeft: `2px solid ${on ? TC.accent : 'transparent'}`,
+    {/* Workspace switcher */}
+    <div style={{
+      display: 'flex', margin: '10px 10px 6px',
+      background: TC.surface2, borderRadius: 6, padding: 3,
+      border: `1px solid ${TC.border}`,
+    }}>
+      {(['crypto', 'stock'] as const).map(w => (
+        <button key={w} onClick={() => onWorkspaceChange(w)} style={{
+          flex: 1, padding: '6px 0', border: 'none', cursor: 'pointer', borderRadius: 4,
+          background: workspace === w ? TC.surface3 : 'transparent',
+          color: workspace === w ? TC.text : TC.textMuted,
+          fontFamily: TC.fontMono, fontSize: 11, fontWeight: workspace === w ? 700 : 400,
           transition: 'all 0.12s',
+          boxShadow: workspace === w ? `0 0 0 1px ${TC.border}` : 'none',
         }}>
-          <Icon/>{label}
+          {w === 'crypto' ? '₿ Crypto' : '📈 Stocks'}
         </button>
-      )
-    })}
+      ))}
+    </div>
+
+    <div style={{ width: 'auto', margin: '0 10px 8px', height: 1, background: TC.border }}/>
+
+    {/* Nav items */}
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2, padding: '2px 0' }}>
+      {NAV_ITEMS.map(({ id, label, Icon }) => {
+        const on = activePath === id
+        return (
+          <button key={id} onClick={() => navigate(id)} style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            padding: '10px 18px', border: 'none', cursor: 'pointer', width: '100%', textAlign: 'left',
+            background: on ? 'rgba(0,212,255,0.07)' : 'transparent',
+            color: on ? TC.accent : TC.textMid,
+            fontFamily: TC.fontUI, fontSize: 12.5, fontWeight: on ? 600 : 400,
+            borderLeft: `2px solid ${on ? TC.accent : 'transparent'}`,
+            transition: 'all 0.12s',
+          }}>
+            <Icon/>{label}
+          </button>
+        )
+      })}
+    </div>
   </aside>
 )
 

@@ -109,6 +109,7 @@ class Strategy(Base):
     name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     config: Mapped[Any] = mapped_column(JSONB, nullable=False)
     is_active: Mapped[bool | None] = mapped_column(Boolean, server_default="FALSE")
+    asset_type: Mapped[str | None] = mapped_column(Text)   # crypto | stock
     created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default="NOW()"
     )

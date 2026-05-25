@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { api, SocialPost, FeedSource } from '../api'
+import { useStore } from '../store'
 import { TC } from '../theme'
 
 type Source   = 'reddit' | 'twitter' | 'rss'
@@ -186,12 +187,18 @@ function SourcesPanel({ onClose }: { onClose: () => void }) {
 }
 
 export default function Social() {
+  const workspace = useStore(s => s.workspace)
   const [source, setSource]         = useState<Source>('reddit')
-  const [category, setCategory]     = useState<Category | ''>('crypto')
+  const [category, setCategory]     = useState<Category | ''>(() => workspace === 'crypto' ? 'crypto' : '')
   const [posts, setPosts]           = useState<SocialPost[]>([])
   const [loading, setLoading]       = useState(false)
   const [error, setError]           = useState<string | null>(null)
   const [showSources, setShowSources] = useState(false)
+
+  // Sync category with workspace when workspace changes
+  useEffect(() => {
+    setCategory(workspace === 'crypto' ? 'crypto' : '')
+  }, [workspace])
 
   const SOURCES: { id: Source; label: string }[] = [
     { id: 'reddit',  label: 'Reddit'  },
