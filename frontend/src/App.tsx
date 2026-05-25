@@ -4,6 +4,7 @@ import { api } from './api'
 import { useStore } from './store'
 import { TC } from './theme'
 import { TCNavbar, TCSidebar, TCKillBanner } from './components/ui'
+import { useWebSocket } from './hooks/useWebSocket'
 import Dashboard from './pages/Dashboard'
 import ChartView from './pages/ChartView'
 import StrategyBuilder from './pages/StrategyBuilder'
@@ -15,8 +16,12 @@ import Social from './pages/Social'
 function AppShell() {
   const { killSwitch, tradingMode, wsStatus, setKillSwitch, setTradingMode, setActiveStrategy, activeStrategy, workspace, setWorkspace } = useStore()
   const [transitioning, setTransitioning] = useState(false)
+  const [dbOk, setDbOk] = useState(true)
   const navigate = useNavigate()
   const location = useLocation()
+
+  // Keep signals WS connected at all times so Navbar WS indicator stays accurate
+  useWebSocket('signals')
 
   useEffect(() => {
     api.getControl().then(({ kill_switch, trading_mode }) => {
@@ -24,6 +29,14 @@ function AppShell() {
       setTradingMode(trading_mode)
     }).catch(() => {})
     api.getActiveStrategy().then(setActiveStrategy).catch(() => {})
+  }, [])
+
+  // Poll /health every 30s for real DB status
+  useEffect(() => {
+    const check = () => api.health().then(h => setDbOk(h.db === 'connected')).catch(() => setDbOk(false))
+    check()
+    const iv = setInterval(check, 30000)
+    return () => clearInterval(iv)
   }, [])
 
   const handleNavigate = (path: string) => {
@@ -55,7 +68,7 @@ function AppShell() {
         killSwitch={killSwitch}
         setKillSwitch={handleKillSwitch}
         wsOk={wsStatus === 'open'}
-        dbOk={true}
+        dbOk={dbOk}
         strategyName={strategyName}
       />
 

@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { api } from '../api'
 import { useStore } from '../store'
-import { useWebSocket } from '../hooks/useWebSocket'
 import { TC } from '../theme'
 import { TCBadge, TCEmpty } from '../components/ui'
 
@@ -79,7 +78,6 @@ function SignalRow({ signal, highlight }: { signal: SignalEvent; highlight: bool
 
 export default function SignalMonitor() {
   const { signals: rawSignals, wsStatus, pushSignal, clearSignals, workspace } = useStore()
-  useWebSocket('signals')
 
   const [filter, setFilter]       = useState<Filter>('ALL')
   const [latency, setLatency]     = useState(0)
