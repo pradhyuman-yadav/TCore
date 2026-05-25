@@ -1,3 +1,4 @@
+import os
 from contextlib import asynccontextmanager
 
 import structlog
@@ -19,6 +20,8 @@ log = structlog.get_logger()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from app.services.binanceus_ws import binanceus_stream
+
+    _in_test = bool(os.getenv("PYTEST_CURRENT_TEST"))
 
     # ── Startup ──────────────────────────────────────────────────────────
     async with AsyncSessionLocal() as session:
@@ -54,11 +57,12 @@ async def lifespan(app: FastAPI):
         ]
         log.info("watchlist.loaded", count=len(app_state.watched_symbols))
 
-    # Start Binance US WebSocket stream for crypto symbols
+    # Start Binance US WebSocket stream for crypto symbols (skip in test runs)
     crypto_symbols = [
         s["symbol"] for s in app_state.watched_symbols if s["asset_type"] == "crypto"
     ]
-    await binanceus_stream.start(crypto_symbols)
+    if not _in_test:
+        await binanceus_stream.start(crypto_symbols)
     app.state.binanceus_stream = binanceus_stream
 
     scheduler = AsyncIOScheduler()
@@ -70,7 +74,8 @@ async def lifespan(app: FastAPI):
     yield
 
     # ── Shutdown ─────────────────────────────────────────────────────────
-    await binanceus_stream.stop()
+    if not _in_test:
+        await binanceus_stream.stop()
     scheduler.shutdown(wait=False)
 
     # Close CCXT aiohttp session to prevent ResourceWarning
