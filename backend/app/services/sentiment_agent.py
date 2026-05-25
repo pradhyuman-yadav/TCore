@@ -31,11 +31,9 @@ def _clamp(v: float) -> float:
 async def _call_claude_proxy(headlines: list[str], symbol: str) -> tuple[float, str]:
     """Call claude-max-api-proxy (OpenAI-compatible)."""
     joined = "\n".join(f"- {h}" for h in headlines)
-    system = (
+    message = (
         "You are a financial sentiment analyzer. "
-        "Return ONLY a JSON object: {\"score\": <float -1.0 to 1.0>, \"reasoning\": \"<one sentence>\"}"
-    )
-    user = (
+        "Return ONLY a JSON object: {\"score\": <float -1.0 to 1.0>, \"reasoning\": \"<one sentence>\"}\n\n"
         f"Score the sentiment of these {symbol} headlines on a scale of "
         f"-1.0 (very bearish) to 1.0 (very bullish):\n{joined}"
     )
@@ -50,8 +48,7 @@ async def _call_claude_proxy(headlines: list[str], symbol: str) -> tuple[float, 
                 "model": _MODEL,
                 "max_tokens": 128,
                 "messages": [
-                    {"role": "system", "content": system},
-                    {"role": "user",   "content": user},
+                    {"role": "user", "content": message},
                 ],
             },
         )
@@ -70,13 +67,11 @@ async def _call_claude_direct(headlines: list[str], symbol: str) -> tuple[float,
     from app.services.claude_auth import get_auth_headers
     auth_headers = await get_auth_headers()
     joined = "\n".join(f"- {h}" for h in headlines)
-    prompt = (
-        f"You are a financial sentiment analyzer. Score the overall sentiment of these "
-        f"news headlines for {symbol} on a continuous scale from -1.0 (very bearish) to "
-        f"1.0 (very bullish). Return ONLY a JSON object with two keys:\n"
-        f"  \"score\": a float between -1.0 and 1.0\n"
-        f"  \"reasoning\": a single sentence explaining the score\n\n"
-        f"Headlines:\n{joined}"
+    message = (
+        "You are a financial sentiment analyzer. "
+        "Return ONLY a JSON object: {\"score\": <float -1.0 to 1.0>, \"reasoning\": \"<one sentence>\"}\n\n"
+        f"Score the sentiment of these {symbol} headlines on a scale of "
+        f"-1.0 (very bearish) to 1.0 (very bullish):\n{joined}"
     )
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.post(
@@ -89,7 +84,7 @@ async def _call_claude_direct(headlines: list[str], symbol: str) -> tuple[float,
             json={
                 "model": _MODEL_DIRECT,
                 "max_tokens": 128,
-                "messages": [{"role": "user", "content": prompt}],
+                "messages": [{"role": "user", "content": message}],
             },
         )
         resp.raise_for_status()
