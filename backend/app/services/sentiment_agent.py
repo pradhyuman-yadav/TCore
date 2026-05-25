@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 #   Routes requests through Claude Code CLI → subscription, no API credits.
 # Fallback: direct Anthropic API (requires ANTHROPIC_API_KEY)
 _PROXY_URL = os.environ.get("CLAUDE_PROXY_URL", "").rstrip("/")
-_PROXY_API_KEY = os.environ.get("CLAUDE_PROXY_API_KEY", "any")  # Bearer token for proxy
+_PROXY_API_KEY = os.environ.get("CLAUDE_PROXY_API_KEY", "")  # Bearer token — set via env, never hardcoded
 _ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 _MODEL = "claude-haiku-4"           # proxy model alias
 _MODEL_DIRECT = "claude-haiku-4-5-20251001"   # direct API model id

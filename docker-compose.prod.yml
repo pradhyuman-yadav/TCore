@@ -3,6 +3,7 @@
 # Required Portainer env vars:
 #   GHCR_OWNER, DB_*, CCXT_*, TRADING_MODE, APP_VERSION
 #   CLAUDE_PROXY_URL=http://claude-proxy.thepk.in  (no trailing slash, no /v1)
+#   CLAUDE_PROXY_API_KEY=<your-key>  (required — never commit the value)
 
 services:
   timescaledb:
@@ -40,7 +41,7 @@ services:
       NTFY_URL: ${NTFY_URL:-}
       NTFY_TOKEN: ${NTFY_TOKEN:-}
       CLAUDE_PROXY_URL: ${CLAUDE_PROXY_URL:-}
-      CLAUDE_PROXY_API_KEY: ${CLAUDE_PROXY_API_KEY:-any}
+      CLAUDE_PROXY_API_KEY: ${CLAUDE_PROXY_API_KEY}
     volumes:
       - strategies:/app/strategies
     healthcheck:
