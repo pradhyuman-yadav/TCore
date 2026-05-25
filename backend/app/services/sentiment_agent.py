@@ -28,6 +28,33 @@ def _clamp(v: float) -> float:
     return max(-1.0, min(1.0, float(v)))
 
 
+def _extract_json(text: str) -> dict:
+    """
+    Parse JSON from a response that may contain markdown fences or surrounding prose.
+    Tries bare parse first, then hunts for the first { ... } block.
+    """
+    text = text.strip()
+    # Fast path — already bare JSON
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    # Strip markdown code fences  ```json ... ``` or ``` ... ```
+    import re
+    fence = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
+    if fence:
+        try:
+            return json.loads(fence.group(1).strip())
+        except json.JSONDecodeError:
+            pass
+    # Find first { ... } block
+    start = text.find("{")
+    end   = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        return json.loads(text[start : end + 1])
+    raise ValueError(f"No JSON object found in response: {text!r}")
+
+
 async def _call_claude_proxy(headlines: list[str], symbol: str) -> tuple[float, str]:
     """Call claude-max-api-proxy (OpenAI-compatible)."""
     joined = "\n".join(f"- {h}" for h in headlines)
@@ -56,7 +83,7 @@ async def _call_claude_proxy(headlines: list[str], symbol: str) -> tuple[float, 
 
     body = resp.json()
     raw = body["choices"][0]["message"]["content"].strip()
-    parsed = json.loads(raw)
+    parsed = _extract_json(raw)
     score = _clamp(float(parsed["score"]))
     reasoning = str(parsed.get("reasoning", ""))
     return score, reasoning
@@ -91,7 +118,7 @@ async def _call_claude_direct(headlines: list[str], symbol: str) -> tuple[float,
 
     body = resp.json()
     raw = body["content"][0]["text"].strip()
-    parsed = json.loads(raw)
+    parsed = _extract_json(raw)
     score = _clamp(float(parsed["score"]))
     reasoning = str(parsed.get("reasoning", ""))
     return score, reasoning
