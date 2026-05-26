@@ -55,6 +55,16 @@ def _extract_json(text: str) -> dict:
     raise ValueError(f"No JSON object found in response: {text!r}")
 
 
+class _BearerAuth(httpx.Auth):
+    """Re-injects Authorization header on every hop, including HTTP→HTTPS redirects."""
+    def __init__(self, token: str) -> None:
+        self._token = token
+
+    def auth_flow(self, request: httpx.Request):  # type: ignore[override]
+        request.headers["Authorization"] = f"Bearer {self._token}"
+        yield request
+
+
 async def _call_claude_proxy(headlines: list[str], symbol: str) -> tuple[float, str]:
     """Call claude-max-api-proxy (OpenAI-compatible)."""
     joined = "\n".join(f"- {h}" for h in headlines)
@@ -64,13 +74,11 @@ async def _call_claude_proxy(headlines: list[str], symbol: str) -> tuple[float, 
         f"Score the sentiment of these {symbol} headlines on a scale of "
         f"-1.0 (very bearish) to 1.0 (very bullish):\n{joined}"
     )
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
         resp = await client.post(
             f"{_PROXY_URL}/v1/chat/completions",
-            headers={
-                "content-type": "application/json",
-                "authorization": f"Bearer {_PROXY_API_KEY}",
-            },
+            auth=_BearerAuth(_PROXY_API_KEY),
+            headers={"content-type": "application/json"},
             json={
                 "model": _MODEL,
                 "max_tokens": 128,
