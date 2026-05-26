@@ -128,11 +128,19 @@ const CAT_TABS = [
   { id: 'stock',  label: 'Stocks' },
 ]
 
+// Category → symbol used for impact scoring
+const CATEGORY_SYMBOL: Record<string, string> = {
+  crypto: 'BTC/USDT',
+  stock:  'AAPL',
+}
+const SCORE_LIMIT = 20   // score top N items per load
+
 export default function News() {
   const workspace = useStore(s => s.workspace)
-  const [articles, setArticles]   = useState<NewsArticle[]>([])
-  const [loading, setLoading]     = useState(true)
-  const [category, setCategory]   = useState<string>(() => workspace === 'crypto' ? 'crypto' : 'stock')
+  const [articles, setArticles]     = useState<NewsArticle[]>([])
+  const [scores, setScores]         = useState<Record<number, number | null>>({})
+  const [loading, setLoading]       = useState(true)
+  const [category, setCategory]     = useState<string>(() => workspace === 'crypto' ? 'crypto' : 'stock')
   const [sourceFilter, setSourceFilter] = useState('All')
   const [lastRefresh, setLastRefresh]   = useState<Date | null>(null)
   const [showSources, setShowSources]   = useState(false)
@@ -146,15 +154,26 @@ export default function News() {
   // Derive unique sources from loaded articles for the source sub-filter
   const knownSources = ['All', ...Array.from(new Set(articles.map(a => a.source).filter(Boolean)))]
 
+  // Fire impact score fetch for one item; updates scores map when resolved
+  const fetchScore = useCallback((article: NewsArticle, idx: number) => {
+    const symbol = CATEGORY_SYMBOL[article.category ?? ''] ?? 'BTC/USDT'
+    api.getImpactScore(article.title, symbol, article.source ?? '', 'rss')
+      .then(r => setScores(prev => ({ ...prev, [idx]: r.impact_score })))
+      .catch(() => {})
+  }, [])
+
   const load = useCallback(async () => {
     setLoading(true)
+    setScores({})
     try {
       const data = await api.getNews(100, category || undefined)
       setArticles(data)
       setLastRefresh(new Date())
+      // Fire score fetches after list renders — non-blocking
+      data.slice(0, SCORE_LIMIT).forEach((a, i) => fetchScore(a, i))
     } catch { /* ignore */ }
     setLoading(false)
-  }, [category])
+  }, [category, fetchScore])
 
   useEffect(() => { load() }, [load])
 
@@ -242,7 +261,7 @@ export default function News() {
           )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {filtered.map((article, i) => (
-              <ArticleCard key={i} article={article}/>
+              <ArticleCard key={i} article={article} impactScore={scores[i]}/>
             ))}
           </div>
         </div>
@@ -253,7 +272,7 @@ export default function News() {
   )
 }
 
-function ArticleCard({ article }: { article: NewsArticle }) {
+function ArticleCard({ article, impactScore }: { article: NewsArticle; impactScore?: number | null }) {
   const [hovered, setHovered] = useState(false)
   return (
     <div
@@ -282,13 +301,15 @@ function ArticleCard({ article }: { article: NewsArticle }) {
             <span style={{ color: TC.textMuted, fontSize: 10, fontFamily: TC.fontMono }}>
               {timeAgo(article.published_at)}
             </span>
-            {article.impact_score != null && (
+            {impactScore != null ? (
               <span style={{
-                color: article.impact_score > 0.6 ? TC.red : article.impact_score > 0.3 ? TC.yellow : TC.textMuted,
+                color: impactScore > 0.6 ? TC.red : impactScore > 0.3 ? TC.yellow : TC.textMuted,
                 fontFamily: TC.fontMono, fontSize: 10, fontWeight: 700,
               }}>
-                ⚡ {(article.impact_score * 100).toFixed(2)}%
+                ⚡ {(impactScore * 100).toFixed(2)}%
               </span>
+            ) : impactScore === undefined && (
+              <span style={{ color: TC.textMuted, fontFamily: TC.fontMono, fontSize: 10 }}>⚡ …</span>
             )}
             {article.url && (
               <span style={{ color: TC.textMuted, fontSize: 10, fontFamily: TC.fontMono }}>↗ Read</span>

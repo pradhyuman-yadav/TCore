@@ -17,6 +17,13 @@ function timeAgo(isoStr: string | null): string {
   return `${Math.floor(hrs / 24)}d ago`
 }
 
+const CATEGORY_SYMBOL: Record<string, string> = {
+  crypto:       'BTC/USDT',
+  us_stock:     'AAPL',
+  indian_stock: 'RELIANCE.NS',
+}
+const SCORE_LIMIT = 20
+
 const CATEGORIES: { id: Category; label: string }[] = [
   { id: 'crypto',       label: 'Crypto'        },
   { id: 'us_stock',     label: 'US Stocks'     },
@@ -188,11 +195,12 @@ function SourcesPanel({ onClose }: { onClose: () => void }) {
 
 export default function Social() {
   const workspace = useStore(s => s.workspace)
-  const [source, setSource]         = useState<Source>('reddit')
-  const [category, setCategory]     = useState<Category | ''>(() => workspace === 'crypto' ? 'crypto' : '')
-  const [posts, setPosts]           = useState<SocialPost[]>([])
-  const [loading, setLoading]       = useState(false)
-  const [error, setError]           = useState<string | null>(null)
+  const [source, setSource]           = useState<Source>('reddit')
+  const [category, setCategory]       = useState<Category | ''>(() => workspace === 'crypto' ? 'crypto' : '')
+  const [posts, setPosts]             = useState<SocialPost[]>([])
+  const [scores, setScores]           = useState<Record<number, number | null>>({})
+  const [loading, setLoading]         = useState(false)
+  const [error, setError]             = useState<string | null>(null)
   const [showSources, setShowSources] = useState(false)
 
   // Sync category with workspace when workspace changes
@@ -206,12 +214,22 @@ export default function Social() {
     { id: 'twitter', label: 'Twitter' },
   ]
 
+  const fetchScore = useCallback((post: SocialPost, idx: number) => {
+    const sym = CATEGORY_SYMBOL[post.category ?? ''] ?? 'BTC/USDT'
+    api.getImpactScore(post.title, sym, post.source ?? '', post.platform ?? 'rss')
+      .then(r => setScores(prev => ({ ...prev, [idx]: r.impact_score })))
+      .catch(() => {})
+  }, [])
+
   const load = useCallback(async () => {
     setLoading(true)
+    setScores({})
     setError(null)
     try {
       const data = await api.getSocial(source, 40, category || undefined)
       setPosts(data)
+      // Fire score fetches after list renders — non-blocking
+      data.slice(0, SCORE_LIMIT).forEach((p, i) => fetchScore(p, i))
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Failed to load'
       if (source === 'twitter' && (msg.includes('503') || msg.includes('404'))) {
@@ -222,7 +240,7 @@ export default function Social() {
       setPosts([])
     }
     setLoading(false)
-  }, [source, category])
+  }, [source, category, fetchScore])
 
   useEffect(() => { load() }, [load])
 
@@ -302,7 +320,7 @@ export default function Social() {
           )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {posts.map((post, i) => (
-              <PostCard key={i} post={post} source={source}/>
+              <PostCard key={i} post={post} source={source} impactScore={scores[i]}/>
             ))}
           </div>
           {!loading && !error && posts.length === 0 && (
@@ -318,7 +336,7 @@ export default function Social() {
   )
 }
 
-function PostCard({ post, source }: { post: SocialPost; source: Source }) {
+function PostCard({ post, source, impactScore }: { post: SocialPost; source: Source; impactScore?: number | null }) {
   const [hovered, setHovered] = useState(false)
   const platformCol: Record<string, string> = {
     reddit:  '#ff4500',
@@ -352,13 +370,15 @@ function PostCard({ post, source }: { post: SocialPost; source: Source }) {
             )}
           </>
         )}
-        {post.impact_score != null && (
+        {impactScore != null ? (
           <span style={{
-            color: post.impact_score > 0.6 ? TC.red : post.impact_score > 0.3 ? TC.yellow : TC.textMuted,
+            color: impactScore > 0.6 ? TC.red : impactScore > 0.3 ? TC.yellow : TC.textMuted,
             fontFamily: TC.fontMono, fontSize: 10, fontWeight: 700,
           }}>
-            ⚡ {(post.impact_score * 100).toFixed(2)}%
+            ⚡ {(impactScore * 100).toFixed(2)}%
           </span>
+        ) : impactScore === undefined && (
+          <span style={{ color: TC.textMuted, fontFamily: TC.fontMono, fontSize: 10 }}>⚡ …</span>
         )}
         <span style={{ color: TC.textMuted, fontSize: 10, fontFamily: TC.fontMono, marginLeft: 'auto' }}>
           {timeAgo(post.published_at)}

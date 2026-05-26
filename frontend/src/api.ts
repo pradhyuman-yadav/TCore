@@ -82,6 +82,12 @@ export const api = {
   getClaudeHealth: () => req<ClaudeHealth>('/health/claude'),
   getProxyHealth:  () => req<ProxyHealth>('/health/proxy'),
 
+  // Price-impact score for a single item (cache-first on backend)
+  getImpactScore: (text: string, symbol: string, source: string, platform: string) =>
+    req<{ impact_score: number | null }>(
+      `/impact?${new URLSearchParams({ text, symbol, source, platform }).toString()}`
+    ),
+
   // Paper account
   getPaperAccount: () => req<PaperAccount>('/paper/account'),
   setPaperAccount: (config: PaperAccountConfig) =>
