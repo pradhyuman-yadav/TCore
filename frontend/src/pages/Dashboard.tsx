@@ -238,6 +238,22 @@ function ClaudeCard() {
           {health.detail}
         </div>
       )}
+      {health?.proxy && (
+        <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${TC.border}`, display: 'flex', gap: 10 }}>
+          <span style={{ color: TC.textMuted, fontFamily: TC.fontMono, fontSize: 9 }}>
+            ↑ {Math.floor((health.proxy.uptime_seconds ?? 0) / 60)}m
+          </span>
+          <span style={{ color: TC.textMuted, fontFamily: TC.fontMono, fontSize: 9 }}>
+            {health.proxy.requests} req
+          </span>
+          <span style={{ color: health.proxy.errors > 0 ? TC.red : TC.textMuted, fontFamily: TC.fontMono, fontSize: 9 }}>
+            {health.proxy.errors} err
+          </span>
+          <span style={{ color: health.proxy.auth_configured ? TC.green : TC.red, fontFamily: TC.fontMono, fontSize: 9 }}>
+            {health.proxy.auth_configured ? '✓ auth' : '✗ auth'}
+          </span>
+        </div>
+      )}
     </TCCard>
   )
 }

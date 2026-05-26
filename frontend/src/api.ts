@@ -255,6 +255,13 @@ export interface ClaudeHealth {
   reasoning?: string
   latency_ms: number | null
   detail?: string
+  proxy?: {
+    status: string
+    uptime_seconds: number
+    requests: number
+    errors: number
+    auth_configured: boolean
+  } | null
 }
 
 export interface SocialPost {

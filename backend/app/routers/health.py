@@ -34,16 +34,19 @@ async def claude_health():
             }
 
     # Fast path: verify proxy is reachable before an inference call
+    proxy_health: dict | None = None
     if _PROXY_URL:
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
                 r = await client.get(f"{_PROXY_URL}/health")
                 r.raise_for_status()
+                proxy_health = r.json()
         except Exception as exc:
             return {
                 "status": "error", "mode": mode, "model": model,
                 "detail": f"Proxy unreachable: {exc}",
                 "test_score": None, "latency_ms": None,
+                "proxy": None,
             }
 
     try:
@@ -60,12 +63,14 @@ async def claude_health():
             "test_score": round(score, 4),
             "reasoning": reasoning,
             "latency_ms": latency_ms,
+            "proxy": proxy_health,
         }
     except Exception as exc:
         return {
             "status": "error", "mode": mode, "model": model,
             "detail": str(exc),
             "test_score": None, "latency_ms": None,
+            "proxy": proxy_health,
         }
 
 
