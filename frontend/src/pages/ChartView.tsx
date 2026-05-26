@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { api, WatchedSymbol, PaperAccount, PaperAccountConfig, IndicatorRow } from '../api'
+import { api, WatchedSymbol, PaperAccount, PaperAccountConfig, IndicatorRow, HawkesPressureResponse } from '../api'
 import { TC } from '../theme'
 import { TCSectionHeader } from '../components/ui'
 import { createChart, ColorType, CrosshairMode } from 'lightweight-charts'
@@ -622,6 +622,230 @@ function PaperAccountModal({ onClose }: { onClose: () => void }) {
 }
 
 
+// ── Hawkes OFI Pane ──────────────────────────────────────────────────────────
+function HawkesPane({ symbol }: { symbol: string }) {
+  const [data, setData]       = useState<HawkesPressureResponse | null>(null)
+  const [noModel, setNoModel] = useState(false)
+  const [history, setHistory] = useState<number[]>([])   // rolling pressure values
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+
+  // Reset when symbol changes
+  useEffect(() => {
+    setData(null)
+    setNoModel(false)
+    setHistory([])
+  }, [symbol])
+
+  // Poll pressure endpoint every 5 s
+  useEffect(() => {
+    if (!symbol) return
+    let dead = false
+
+    const tick = async () => {
+      try {
+        const res = await api.getHawkesPressure(symbol)
+        if (dead) return
+        setData(res)
+        setNoModel(false)
+        setHistory(prev => [...prev.slice(-119), res.pressure])
+      } catch {
+        if (!dead) setNoModel(true)
+      }
+    }
+
+    tick()
+    const iv = setInterval(tick, 5000)
+    return () => { dead = true; clearInterval(iv) }
+  }, [symbol])
+
+  // Redraw sparkline canvas whenever history or regime changes
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas || history.length < 2) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    const { width, height } = canvas
+    ctx.clearRect(0, 0, width, height)
+
+    // Subtle regime tint
+    ctx.fillStyle = data?.regime === 'reflexive'
+      ? 'rgba(255,68,68,0.05)'
+      : 'rgba(0,0,0,0)'
+    ctx.fillRect(0, 0, width, height)
+
+    // Zero line
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)'
+    ctx.lineWidth = 1
+    ctx.setLineDash([4, 4])
+    ctx.beginPath()
+    ctx.moveTo(0, height / 2)
+    ctx.lineTo(width, height / 2)
+    ctx.stroke()
+    ctx.setLineDash([])
+
+    // Pressure line — color based on last value
+    const lastVal = history[history.length - 1]
+    ctx.strokeStyle = lastVal > 0.1 ? TC.green : lastVal < -0.1 ? TC.red : TC.textMid
+    ctx.lineWidth = 1.5
+    ctx.beginPath()
+    const step = width / (history.length - 1)
+    history.forEach((v, i) => {
+      const x = i * step
+      const y = ((1 - v) / 2) * height   // map [−1,1] to [height,0]
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y)
+    })
+    ctx.stroke()
+  }, [history, data?.regime])
+
+  // No model yet
+  if (noModel) {
+    return (
+      <div style={{
+        height: '100%', display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center', gap: 4,
+      }}>
+        <span style={{ color: TC.textMuted, fontFamily: TC.fontMono, fontSize: 10, fontWeight: 700 }}>
+          Hawkes OFI
+        </span>
+        <span style={{ color: TC.textMuted, fontFamily: TC.fontMono, fontSize: 9, opacity: 0.7 }}>
+          No model yet — refit runs every 30 min once tick data accumulates
+        </span>
+      </div>
+    )
+  }
+
+  // Loading
+  if (!data) {
+    return (
+      <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <span style={{ color: TC.textMuted, fontFamily: TC.fontMono, fontSize: 10 }}>Loading Hawkes OFI…</span>
+      </div>
+    )
+  }
+
+  const pressureColor = data.pressure >  0.2 ? TC.green
+                      : data.pressure < -0.2 ? TC.red
+                      : TC.textMid
+  const isReflexive   = data.regime === 'reflexive'
+  const ageStr        = data.params_age_s < 60
+    ? `${data.params_age_s.toFixed(0)}s`
+    : `${(data.params_age_s / 60).toFixed(0)}m`
+
+  return (
+    <div style={{
+      height: '100%', display: 'flex',
+      background: isReflexive ? 'rgba(255,68,68,0.03)' : 'transparent',
+      transition: 'background 0.6s',
+    }}>
+
+      {/* Left: sparkline + pressure value overlay */}
+      <div style={{ flex: 1, position: 'relative', minWidth: 0 }}>
+        <canvas
+          ref={canvasRef}
+          width={800}
+          height={120}
+          style={{ width: '100%', height: '100%', display: 'block' }}
+        />
+        {/* Header */}
+        <div style={{
+          position: 'absolute', top: 6, left: 10,
+          color: TC.textMuted, fontSize: 9, fontFamily: TC.fontMono,
+          letterSpacing: '0.1em', textTransform: 'uppercase',
+          pointerEvents: 'none',
+        }}>
+          Hawkes OFI · {symbol}
+        </div>
+        {/* Big pressure value */}
+        <div style={{
+          position: 'absolute', top: '50%', left: '50%',
+          transform: 'translate(-50%, -50%)', textAlign: 'center',
+          pointerEvents: 'none',
+        }}>
+          <div style={{
+            color: pressureColor, fontFamily: TC.fontMono,
+            fontSize: 28, fontWeight: 700, lineHeight: 1,
+            textShadow: `0 0 20px ${pressureColor}55`,
+          }}>
+            {data.pressure >= 0 ? '+' : ''}{(data.pressure * 100).toFixed(1)}%
+          </div>
+          <div style={{ color: TC.textMuted, fontFamily: TC.fontMono, fontSize: 8, marginTop: 3 }}>
+            PRESSURE
+          </div>
+        </div>
+        {/* Tick count */}
+        <div style={{
+          position: 'absolute', bottom: 6, left: 10,
+          color: TC.textMuted, fontSize: 8.5, fontFamily: TC.fontMono,
+          pointerEvents: 'none',
+        }}>
+          {data.tick_count} ticks / 30s
+        </div>
+      </div>
+
+      {/* Right: stats */}
+      <div style={{
+        width: 170, flexShrink: 0,
+        borderLeft: `1px solid ${TC.border}`,
+        padding: '10px 12px',
+        display: 'flex', flexDirection: 'column', gap: 9,
+      }}>
+        {/* Regime */}
+        <div>
+          <div style={{ color: TC.textMuted, fontSize: 8, fontFamily: TC.fontMono, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+            Regime
+          </div>
+          <div style={{
+            color: isReflexive ? TC.red : TC.green,
+            fontFamily: TC.fontMono, fontSize: 11, fontWeight: 700, marginTop: 2,
+          }}>
+            {data.regime.toUpperCase()}
+          </div>
+        </div>
+
+        {/* Lambda pair */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+          <div>
+            <div style={{ color: TC.textMuted, fontSize: 7.5, fontFamily: TC.fontMono, textTransform: 'uppercase' }}>λ Buy</div>
+            <div style={{ color: TC.green, fontFamily: TC.fontMono, fontSize: 10, fontWeight: 600, marginTop: 2 }}>
+              {data.lambda_buy.toFixed(4)}
+            </div>
+          </div>
+          <div>
+            <div style={{ color: TC.textMuted, fontSize: 7.5, fontFamily: TC.fontMono, textTransform: 'uppercase' }}>λ Sell</div>
+            <div style={{ color: TC.red, fontFamily: TC.fontMono, fontSize: 10, fontWeight: 600, marginTop: 2 }}>
+              {data.lambda_sell.toFixed(4)}
+            </div>
+          </div>
+        </div>
+
+        {/* Branching */}
+        <div>
+          <div style={{ color: TC.textMuted, fontSize: 7.5, fontFamily: TC.fontMono, textTransform: 'uppercase' }}>Branching Ratio</div>
+          <div style={{
+            fontFamily: TC.fontMono, fontSize: 10, fontWeight: 600, marginTop: 2,
+            color: data.branching > 0.9 ? TC.red : data.branching > 0.7 ? TC.yellow : TC.textMid,
+          }}>
+            {data.branching.toFixed(4)}
+          </div>
+        </div>
+
+        {/* Age + model info */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+          <div>
+            <div style={{ color: TC.textMuted, fontSize: 7.5, fontFamily: TC.fontMono, textTransform: 'uppercase' }}>Model age</div>
+            <div style={{ color: TC.textMuted, fontFamily: TC.fontMono, fontSize: 9, marginTop: 2 }}>{ageStr}</div>
+          </div>
+          <div>
+            <div style={{ color: TC.textMuted, fontSize: 7.5, fontFamily: TC.fontMono, textTransform: 'uppercase' }}>Venue</div>
+            <div style={{ color: TC.textMuted, fontFamily: TC.fontMono, fontSize: 9, marginTop: 2 }}>{data.venue}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────
 export default function ChartView() {
   const [watchlist, setWatchlist]           = useState<WatchedSymbol[]>([])
@@ -828,21 +1052,37 @@ export default function ChartView() {
           />
         </div>
 
-        {/* Center: Lightweight Chart */}
-        <div style={{ flex: 1, minWidth: 0, background: TC.bg, overflow: 'hidden' }}>
-          {selected ? (
-            <LightweightChart
-              key={selected.symbol + '|' + selected.exchange}
-              symbol={selected.symbol}
-              exchange={selected.exchange}
-              timeframe={timeframe}
-              onPriceUpdate={handlePriceUpdate}
-            />
-          ) : (
-            <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: TC.textMuted, fontFamily: TC.fontMono, fontSize: 12 }}>
-              Add a symbol to get started
-            </div>
-          )}
+        {/* Center: Chart (65%) + Hawkes OFI pane (35%) */}
+        <div style={{ flex: 1, minWidth: 0, background: TC.bg, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          {/* Main chart — 65% of center height */}
+          <div style={{ flex: '0 0 65%', minHeight: 0, overflow: 'hidden' }}>
+            {selected ? (
+              <LightweightChart
+                key={selected.symbol + '|' + selected.exchange}
+                symbol={selected.symbol}
+                exchange={selected.exchange}
+                timeframe={timeframe}
+                onPriceUpdate={handlePriceUpdate}
+              />
+            ) : (
+              <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: TC.textMuted, fontFamily: TC.fontMono, fontSize: 12 }}>
+                Add a symbol to get started
+              </div>
+            )}
+          </div>
+
+          {/* Hawkes OFI pane — 35% of center height, crypto only */}
+          <div style={{ flex: '0 0 35%', minHeight: 0, overflow: 'hidden', borderTop: `1px solid ${TC.border}` }}>
+            {selected?.asset_type === 'crypto' ? (
+              <HawkesPane symbol={selected.symbol} />
+            ) : (
+              <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <span style={{ color: TC.textMuted, fontFamily: TC.fontMono, fontSize: 10 }}>
+                  Hawkes OFI — crypto only
+                </span>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Right: Live public trades */}

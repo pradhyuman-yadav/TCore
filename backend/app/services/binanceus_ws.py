@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
-import structlog
+from collections import deque
 from datetime import datetime, timezone
+
+import structlog
 
 log = structlog.get_logger()
 
@@ -40,8 +42,11 @@ class BinanceUSStreamClient:
 
     def __init__(self) -> None:
         self._task: asyncio.Task | None = None
+        self._flush_task: asyncio.Task | None = None
         self._symbols: list[str] = []
         self._running = False
+        # Tick buffer for Hawkes OFI — ring buffer capped at 5000, flushed every 2s
+        self._tick_buffer: deque[dict] = deque(maxlen=5000)
 
     def _build_url(self) -> str | None:
         if not self._symbols:
@@ -56,31 +61,37 @@ class BinanceUSStreamClient:
         self._running = True
         if symbols:
             self._task = asyncio.create_task(self._run_loop())
+            self._flush_task = asyncio.create_task(self._flush_loop())
             log.info("binanceus_ws.started", symbols=symbols)
 
     async def update_subscriptions(self, symbols: list[str]) -> None:
         """Called when watchlist changes — reconnect with new symbol set."""
         self._symbols = symbols
-        if self._task and not self._task.done():
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
+        for task in (self._task, self._flush_task):
+            if task and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+        self._task = self._flush_task = None
         if self._running and symbols:
             self._task = asyncio.create_task(self._run_loop())
+            self._flush_task = asyncio.create_task(self._flush_loop())
             log.info("binanceus_ws.resubscribed", symbols=symbols)
         elif not symbols:
             log.info("binanceus_ws.no_symbols_paused")
 
     async def stop(self) -> None:
         self._running = False
-        if self._task and not self._task.done():
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
+        for task in (self._task, self._flush_task):
+            if task and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+        self._task = self._flush_task = None
         log.info("binanceus_ws.stopped")
 
     async def _run_loop(self) -> None:
@@ -175,14 +186,66 @@ class BinanceUSStreamClient:
         from app.ws.manager import ws_manager
 
         symbol = _raw_to_symbol(data.get("s", ""))
+        is_buyer_maker = bool(data.get("m", False))
+
         await ws_manager.broadcast("live_trades", {
             "type": "trade",
             "symbol": symbol,
             "price": float(data.get("p", 0)),
             "qty": float(data.get("q", 0)),
-            "isBuyerMaker": bool(data.get("m", False)),
+            "isBuyerMaker": is_buyer_maker,
             "time": int(data.get("T", 0)) // 1000,
         })
+
+        # Buffer for Hawkes OFI — classify taker side deterministically
+        # m=False → buyer was taker → BUY market order (+1)
+        # m=True  → seller was taker → SELL market order (-1)
+        trade_time_ms = data.get("T", 0)
+        trade_id = data.get("t")  # individual trade ID for dedup
+        ts = datetime.fromtimestamp(int(trade_time_ms) / 1000, tz=timezone.utc)
+        self._tick_buffer.append({
+            "ts":     ts,
+            "symbol": symbol,
+            "venue":  "binanceus",
+            "price":  float(data.get("p", 0)),
+            "qty":    float(data.get("q", 0)),
+            "side":   -1 if is_buyer_maker else 1,
+            "agg_id": int(trade_id) if trade_id is not None else None,
+        })
+
+    async def _flush_loop(self) -> None:
+        """Flush tick buffer to DB every 2 seconds."""
+        try:
+            while self._running:
+                await asyncio.sleep(2)
+                if not self._tick_buffer:
+                    continue
+                # Drain the deque atomically (single-threaded asyncio — safe)
+                ticks: list[dict] = []
+                while self._tick_buffer:
+                    ticks.append(self._tick_buffer.popleft())
+                if ticks:
+                    await self._persist_ticks(ticks)
+        except asyncio.CancelledError:
+            return
+
+    async def _persist_ticks(self, ticks: list[dict]) -> None:
+        """Batch insert ticks to tick_trades hypertable."""
+        from app.db.session import AsyncSessionLocal
+        from app.db.models import TickTrade
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        try:
+            async with AsyncSessionLocal() as db:
+                stmt = (
+                    pg_insert(TickTrade)
+                    .values(ticks)
+                    .on_conflict_do_nothing()
+                )
+                await db.execute(stmt)
+                await db.commit()
+        except Exception as exc:
+            log.warning("binanceus_ws.tick_flush_error", error=str(exc), count=len(ticks))
 
 
 # Module-level singleton

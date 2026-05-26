@@ -138,6 +138,20 @@ export const api = {
     return req<SocialPost[]>(`/social?${p}`)
   },
   refreshSocial: () => req<{ status: string }>('/social/refresh', { method: 'POST' }),
+
+  // Hawkes OFI (crypto only)
+  getHawkesPressure: (symbol: string, venue = 'binanceus') =>
+    req<HawkesPressureResponse>(
+      `/hawkes/pressure?${new URLSearchParams({ symbol, venue }).toString()}`
+    ),
+  getHawkesForecast: (symbol: string, venue = 'binanceus', horizon_s = 5, n_sims = 200) =>
+    req<HawkesForecastResponse>(
+      `/hawkes/forecast?${new URLSearchParams({
+        symbol, venue,
+        horizon_s: String(horizon_s),
+        n_sims: String(n_sims),
+      }).toString()}`
+    ),
 }
 
 // Types
@@ -316,6 +330,29 @@ export interface HealthStatus {
   kill_switch: boolean
   active_strategy: string | null
   ws_connections: Record<string, number>
+}
+
+export interface HawkesPressureResponse {
+  symbol:       string
+  venue:        string
+  pressure:     number   // S_press ∈ [−1, 1]
+  lambda_buy:   number
+  lambda_sell:  number
+  branching:    number
+  regime:       'stable' | 'reflexive'
+  params_age_s: number
+  tick_count:   number
+}
+
+export interface HawkesForecastResponse {
+  symbol:             string
+  venue:              string
+  horizon_s:          number
+  mean:               number
+  p10:                number
+  p50:                number
+  p90:                number
+  prob_buy_pressure:  number
 }
 
 export interface StoredSignal {

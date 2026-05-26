@@ -3,12 +3,14 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
     Double,
     Index,
     Integer,
+    SmallInteger,
     Text,
     UniqueConstraint,
 )
@@ -234,3 +236,32 @@ class FeedSource(Base):
     added_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default="NOW()"
     )
+
+
+class TickTrade(Base):
+    """Raw trade ticks from Binance US aggTrade stream — used by Hawkes OFI."""
+    __tablename__ = "tick_trades"
+
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    symbol: Mapped[str] = mapped_column(Text, primary_key=True)
+    venue: Mapped[str] = mapped_column(Text, primary_key=True, server_default="'binanceus'")
+    price: Mapped[float] = mapped_column(Double, nullable=False)
+    qty: Mapped[float] = mapped_column(Double, nullable=False)
+    side: Mapped[int] = mapped_column(SmallInteger, nullable=False)  # +1 BUY taker, -1 SELL taker
+    agg_id: Mapped[int | None] = mapped_column(BigInteger)           # trade ID for dedup
+
+
+class HawkesParams(Base):
+    """Fitted Hawkes model parameters — cached after each refit job."""
+    __tablename__ = "hawkes_params"
+
+    fitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    symbol: Mapped[str] = mapped_column(Text, primary_key=True)
+    venue: Mapped[str] = mapped_column(Text, primary_key=True)
+    mu: Mapped[Any] = mapped_column(JSONB, nullable=False)       # [mu_b, mu_s]
+    alpha: Mapped[Any] = mapped_column(JSONB, nullable=False)    # 2x2xK amplitudes
+    beta_vals: Mapped[Any] = mapped_column(JSONB, nullable=False) # K decay constants
+    branching: Mapped[float | None] = mapped_column(Double)
+    train_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    train_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    loglik: Mapped[float | None] = mapped_column(Double)

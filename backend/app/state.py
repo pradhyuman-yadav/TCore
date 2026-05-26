@@ -11,6 +11,9 @@ class AppState:
     trading_mode: str = "paper"
     daily_pnl: dict[str, float] = field(default_factory=lambda: {"paper": 0.0, "live": 0.0})
     watched_symbols: list[dict] = field(default_factory=list)
+    # Hawkes OFI — updated by refit_hawkes_job; served by /hawkes/pressure
+    hawkes_pressure: dict[str, float] = field(default_factory=dict)   # symbol → pressure
+    hawkes_regime:   dict[str, str]   = field(default_factory=dict)   # symbol → 'stable'|'reflexive'
     paper_account: dict = field(default_factory=lambda: {
         "initial_capital": 10_000.0,
         "fee_rate": 0.001,      # 0.1% maker/taker (Binance standard)

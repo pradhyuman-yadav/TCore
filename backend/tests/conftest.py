@@ -63,7 +63,8 @@ async def db_session(run_migrations):
     async with factory() as session:
         await session.execute(text(
             "TRUNCATE ohlcv, indicator_snapshots, composite_scores, "
-            "trades, positions, strategies, sentiment_cache"
+            "trades, positions, strategies, sentiment_cache, "
+            "tick_trades, hawkes_params"
         ))
         await session.commit()
         yield session

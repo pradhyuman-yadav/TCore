@@ -384,6 +384,46 @@ async def refresh_social_job() -> None:
         log.error("social.refresh_error", error=str(exc))
 
 
+async def refit_hawkes_job() -> None:
+    """30-min job: refit Hawkes OFI model for all active crypto watched symbols."""
+    from app.services.hawkes_ofi import fit_model
+
+    crypto_symbols = [s for s in app_state.watched_symbols if s["asset_type"] == "crypto"]
+    if not crypto_symbols:
+        return
+
+    for sym_info in crypto_symbols:
+        symbol = sym_info["symbol"]
+        venue  = sym_info["exchange"]
+        try:
+            async with AsyncSessionLocal() as db:
+                params = await fit_model(symbol, venue, db)
+            if params is not None:
+                app_state.hawkes_regime[symbol] = params.regime
+                log.info("hawkes.refitted",
+                         symbol=symbol,
+                         branching=round(params.branching, 4),
+                         regime=params.regime)
+        except Exception as exc:
+            log.error("hawkes.refit_error", symbol=symbol, error=str(exc))
+
+
+async def cleanup_tick_trades_job() -> None:
+    """Daily job: delete tick_trades rows older than 24 hours."""
+    from datetime import timedelta
+    from sqlalchemy import delete
+    from app.db.models import TickTrade
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(delete(TickTrade).where(TickTrade.ts < cutoff))
+            await db.commit()
+            log.info("tick_trades.cleanup", deleted_rows=result.rowcount)
+    except Exception as exc:
+        log.error("tick_trades.cleanup_error", error=str(exc))
+
+
 def setup_scheduler(scheduler: AsyncIOScheduler) -> None:
     import os
     _in_test = bool(os.getenv("PYTEST_CURRENT_TEST"))
@@ -439,6 +479,26 @@ def setup_scheduler(scheduler: AsyncIOScheduler) -> None:
         replace_existing=True,
         next_run_time=None if _in_test else datetime.now(timezone.utc),
         misfire_grace_time=180,
+    )
+
+    scheduler.add_job(
+        refit_hawkes_job,
+        trigger="interval",
+        minutes=30,
+        id="hawkes_refit",
+        replace_existing=True,
+        next_run_time=None if _in_test else datetime.now(timezone.utc),
+        misfire_grace_time=300,
+    )
+
+    scheduler.add_job(
+        cleanup_tick_trades_job,
+        trigger="cron",
+        hour=3,
+        minute=0,
+        id="tick_trades_cleanup",
+        replace_existing=True,
+        misfire_grace_time=300,
     )
 
     log.info("scheduler.job_registered", cadence_seconds=cadence)
