@@ -282,6 +282,14 @@ function ArticleCard({ article }: { article: NewsArticle }) {
             <span style={{ color: TC.textMuted, fontSize: 10, fontFamily: TC.fontMono }}>
               {timeAgo(article.published_at)}
             </span>
+            {article.impact_score != null && (
+              <span style={{
+                color: article.impact_score > 0.6 ? TC.red : article.impact_score > 0.3 ? TC.yellow : TC.textMuted,
+                fontFamily: TC.fontMono, fontSize: 10, fontWeight: 700,
+              }}>
+                ⚡ {(article.impact_score * 100).toFixed(2)}%
+              </span>
+            )}
             {article.url && (
               <span style={{ color: TC.textMuted, fontSize: 10, fontFamily: TC.fontMono }}>↗ Read</span>
             )}

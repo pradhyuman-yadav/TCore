@@ -12,6 +12,22 @@ from app.ws.manager import ws_manager
 router = APIRouter()
 
 
+@router.get("/health/proxy")
+async def proxy_health():
+    """Lightweight proxy health check — no inference, no Claude auth."""
+    from app.services.sentiment_agent import _PROXY_URL, claude_mode
+    mode = claude_mode()
+    if not _PROXY_URL:
+        return {"mode": mode, "proxy": None}
+    try:
+        async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
+            r = await client.get(f"{_PROXY_URL}/health")
+            r.raise_for_status()
+            return {"mode": mode, "proxy": r.json()}
+    except Exception as exc:
+        return {"mode": mode, "proxy": None, "error": str(exc)}
+
+
 @router.get("/health/claude")
 async def claude_health():
     """
@@ -34,19 +50,16 @@ async def claude_health():
             }
 
     # Fast path: verify proxy is reachable before an inference call
-    proxy_health: dict | None = None
     if _PROXY_URL:
         try:
             async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
                 r = await client.get(f"{_PROXY_URL}/health")
                 r.raise_for_status()
-                proxy_health = r.json()
         except Exception as exc:
             return {
                 "status": "error", "mode": mode, "model": model,
                 "detail": f"Proxy unreachable: {exc}",
                 "test_score": None, "latency_ms": None,
-                "proxy": None,
             }
 
     try:
@@ -63,14 +76,12 @@ async def claude_health():
             "test_score": round(score, 4),
             "reasoning": reasoning,
             "latency_ms": latency_ms,
-            "proxy": proxy_health,
         }
     except Exception as exc:
         return {
             "status": "error", "mode": mode, "model": model,
             "detail": str(exc),
             "test_score": None, "latency_ms": None,
-            "proxy": proxy_health,
         }
 
 

@@ -146,6 +146,193 @@ def claude_mode() -> str:
     return "proxy" if _PROXY_URL else "direct"
 
 
+# ── Source reach lookup ───────────────────────────────────────────────────────
+_SOURCE_REACH: dict[str, int] = {
+    "coindesk":      5_000_000,
+    "cointelegraph": 4_000_000,
+    "decrypt":       2_000_000,
+    "reuters":       26_000_000,
+    "bloomberg":     30_000_000,
+    "economictimes": 8_000_000,
+    "wsj":           38_000_000,
+    "ft":            20_000_000,
+    "cnbc":          40_000_000,
+    "bbc":           100_000_000,
+}
+_DEFAULT_REACH = 100_000
+
+
+async def get_source_reach(source: str, platform: str) -> int:
+    """
+    Returns estimated follower/subscriber count for a news or social source.
+    Reddit: fetches live subscriber count from public JSON API.
+    Others: matched against known-source dict or default.
+    """
+    key = source.lower()
+
+    # Reddit: live subscriber count
+    if platform == "reddit" and source.startswith("r/"):
+        subreddit = source[2:]
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as c:
+                r = await c.get(
+                    f"https://www.reddit.com/r/{subreddit}/about.json",
+                    headers={"User-Agent": "TradeCore/1.0"},
+                )
+                return int(r.json()["data"]["subscribers"])
+        except Exception:
+            return _DEFAULT_REACH
+
+    # Named sources
+    for name, reach in _SOURCE_REACH.items():
+        if name in key:
+            return reach
+    return _DEFAULT_REACH
+
+
+async def _get_symbol_volume(symbol: str, db: "AsyncSession") -> float:
+    """Fetch total volume for symbol over last 24 hours from OHLCV table."""
+    try:
+        from app.db.models import OHLCV
+        from sqlalchemy import select as sa_select
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+        rows = (
+            await db.execute(
+                sa_select(OHLCV.volume).where(
+                    OHLCV.symbol == symbol,
+                    OHLCV.time >= cutoff,
+                )
+            )
+        ).scalars().all()
+        return float(sum(r for r in rows if r is not None))
+    except Exception:
+        return 0.0
+
+
+async def _call_claude_impact_proxy(message: str, symbol: str) -> tuple[float, str]:
+    async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+        resp = await client.post(
+            f"{_PROXY_URL}/v1/chat/completions",
+            auth=_BearerAuth(_PROXY_API_KEY),
+            headers={"content-type": "application/json"},
+            json={
+                "model": _MODEL,
+                "max_tokens": 128,
+                "messages": [{"role": "user", "content": message}],
+            },
+        )
+        resp.raise_for_status()
+    body = resp.json()
+    raw = body["choices"][0]["message"]["content"].strip()
+    parsed = _extract_json(raw)
+    score = max(0.0, min(1.0, float(parsed["impact"])))
+    return round(score, 4), str(parsed.get("reasoning", ""))
+
+
+async def _call_claude_impact_direct(message: str, symbol: str) -> tuple[float, str]:
+    from app.services.claude_auth import get_auth_headers
+    auth_headers = await get_auth_headers()
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(
+            _ANTHROPIC_URL,
+            headers={**auth_headers, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+            json={
+                "model": _MODEL_DIRECT,
+                "max_tokens": 128,
+                "messages": [{"role": "user", "content": message}],
+            },
+        )
+        resp.raise_for_status()
+    body = resp.json()
+    raw = body["content"][0]["text"].strip()
+    parsed = _extract_json(raw)
+    score = max(0.0, min(1.0, float(parsed["impact"])))
+    return round(score, 4), str(parsed.get("reasoning", ""))
+
+
+async def score_price_impact(
+    text: str,
+    symbol: str,
+    source_reach: int,
+    symbol_volume: float,
+    cache_ttl_minutes: int = 1440,   # 24h — impact score for a given item is stable
+    db: "AsyncSession | None" = None,
+) -> float | None:
+    """
+    Returns a 4-decimal probability [0.0000, 1.0000] of price impact.
+    Cache-first: sha256(text+symbol) checked in SentimentCache before any Claude call.
+    """
+    if not text:
+        return None
+
+    from app.db.models import SentimentCache
+
+    content_hash = _make_hash(text + symbol)
+
+    # ── Cache read ────────────────────────────────────────────────────
+    if db is not None:
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=cache_ttl_minutes)
+        row = (
+            await db.execute(
+                select(SentimentCache).where(
+                    SentimentCache.content_hash == content_hash,
+                    SentimentCache.source == "impact",
+                    SentimentCache.fetched_at >= cutoff,
+                )
+            )
+        ).scalars().first()
+        if row is not None:
+            return row.score   # cache hit — zero Claude calls
+
+    # ── Claude call ───────────────────────────────────────────────────
+    try:
+        message = (
+            f"You are a financial market-impact analyst.\n"
+            f"Estimate the probability (0.0000 to 1.0000, exactly 4 decimal places) "
+            f"that this content will move the price of {symbol}.\n\n"
+            f"Signals:\n"
+            f"- Source reach: {source_reach:,} followers/subscribers\n"
+            f"- Asset 24h volume: ${symbol_volume:,.0f}\n\n"
+            f"Return ONLY a JSON object: "
+            f'{{\"impact\": <float 0.0000-1.0000>, \"reasoning\": \"<one sentence>\"}}\n\n'
+            f"Content: {text}"
+        )
+        if _PROXY_URL:
+            score, reasoning = await _call_claude_impact_proxy(message, symbol)
+        else:
+            score, reasoning = await _call_claude_impact_direct(message, symbol)
+    except Exception:
+        return None
+
+    # ── Cache write ───────────────────────────────────────────────────
+    if db is not None:
+        try:
+            from sqlalchemy.dialects.postgresql import insert as pg_insert
+            stmt = pg_insert(SentimentCache).values(
+                source="impact",
+                symbol=symbol,
+                raw_content=text,
+                score=score,
+                reasoning=reasoning,
+                model_used=_MODEL if _PROXY_URL else _MODEL_DIRECT,
+                fetched_at=datetime.now(timezone.utc),
+                content_hash=content_hash,
+            ).on_conflict_do_update(
+                index_elements=["content_hash"],
+                set_={
+                    "score": score,
+                    "reasoning": reasoning,
+                    "fetched_at": datetime.now(timezone.utc),
+                },
+            )
+            await db.execute(stmt)
+            await db.commit()
+        except Exception:
+            pass
+
+    return score
+
+
 async def score_sentiment(
     headlines: list[str],
     symbol: str,

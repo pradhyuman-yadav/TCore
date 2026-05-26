@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api, ClaudeHealth, HealthStatus, Position, Trade } from '../api'
+import { api, ClaudeHealth, ProxyHealth, HealthStatus, Position, Trade } from '../api'
 import { useStore } from '../store'
 import { TC } from '../theme'
 import { TCCard, TCBadge, TCSectionHeader, TCTable, TCEmpty, ColDef } from '../components/ui'
@@ -192,31 +192,38 @@ function StatusCard({ label, value, sub, status }: { label: string; value: strin
 
 // ── Claude Health Card ───────────────────────────────────────────────────────
 function ClaudeCard() {
-  const [health, setHealth]   = useState<ClaudeHealth | null>(null)
-  const [testing, setTesting] = useState(false)
+  const [proxyHealth, setProxyHealth] = useState<ProxyHealth | null>(null)
+  const [inference, setInference]     = useState<ClaudeHealth | null>(null)
+  const [testing, setTesting]         = useState(false)
 
-  const test = async () => {
+  // Poll proxy health every 60s — no inference call
+  useEffect(() => {
+    const check = () => api.getProxyHealth().then(setProxyHealth).catch(() => {})
+    check()
+    const iv = setInterval(check, 60_000)
+    return () => clearInterval(iv)
+  }, [])
+
+  const runTest = async () => {
     setTesting(true)
     try {
       const h = await api.getClaudeHealth()
-      setHealth(h)
+      setInference(h)
     } catch {
-      setHealth({ status: 'error', model: null, test_score: null, latency_ms: null, detail: 'Request failed' })
+      setInference({ status: 'error', model: null, test_score: null, latency_ms: null, detail: 'Request failed' })
     }
     setTesting(false)
   }
 
-  useEffect(() => { test() }, [])
-
-  const isOk  = health?.status === 'ok'
-  const col   = health === null ? TC.textMuted : isOk ? TC.green : TC.red
-  const label = health === null ? '…' : isOk ? `${health.latency_ms}ms` : 'ERROR'
+  const proxyOk = proxyHealth?.proxy?.status === 'ok'
+  const col     = proxyHealth === null ? TC.textMuted : proxyOk ? TC.green : proxyHealth?.proxy === null ? TC.yellow : TC.red
+  const modeLabel = proxyHealth === null ? '…' : (proxyHealth.mode ?? 'direct').toUpperCase()
 
   return (
     <TCCard style={{ padding: '14px 16px', flex: 1, minWidth: 0 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div style={{ color: TC.textMuted, fontSize: 9, fontFamily: TC.fontMono, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 10 }}>Claude AI</div>
-        <button onClick={test} disabled={testing} style={{
+        <button onClick={runTest} disabled={testing} style={{
           padding: '2px 8px', borderRadius: 3, cursor: testing ? 'not-allowed' : 'pointer',
           border: `1px solid ${TC.border}`, background: 'transparent',
           color: TC.textMuted, fontFamily: TC.fontMono, fontSize: 9, fontWeight: 700,
@@ -224,34 +231,48 @@ function ClaudeCard() {
           {testing ? '…' : '▶ TEST'}
         </button>
       </div>
+
+      {/* Status dot + mode */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <div style={{ width: 7, height: 7, borderRadius: '50%', background: col, boxShadow: `0 0 7px ${col}`, flexShrink: 0 }}/>
-        <span style={{ color: TC.text, fontFamily: TC.fontMono, fontWeight: 600, fontSize: 13 }}>{label}</span>
+        <span style={{ color: TC.text, fontFamily: TC.fontMono, fontWeight: 600, fontSize: 13 }}>{modeLabel}</span>
       </div>
-      {health?.status === 'ok' && health.test_score !== null && (
-        <div style={{ color: TC.textMuted, fontSize: 10, fontFamily: TC.fontMono, marginTop: 5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          score {health.test_score > 0 ? '+' : ''}{health.test_score?.toFixed(3)} · {health.model}
-        </div>
-      )}
-      {health?.status === 'error' && (
-        <div style={{ color: TC.red, fontSize: 10, fontFamily: TC.fontMono, marginTop: 5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {health.detail}
-        </div>
-      )}
-      {health?.proxy && (
-        <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${TC.border}`, display: 'flex', gap: 10 }}>
+
+      {/* Proxy stats (only when proxy is configured and reachable) */}
+      {proxyHealth?.proxy && (
+        <div style={{ marginTop: 8, display: 'flex', gap: 10 }}>
           <span style={{ color: TC.textMuted, fontFamily: TC.fontMono, fontSize: 9 }}>
-            ↑ {Math.floor((health.proxy.uptime_seconds ?? 0) / 60)}m
+            ↑ {Math.floor((proxyHealth.proxy.uptime_seconds ?? 0) / 60)}m
           </span>
           <span style={{ color: TC.textMuted, fontFamily: TC.fontMono, fontSize: 9 }}>
-            {health.proxy.requests} req
+            {proxyHealth.proxy.requests} req
           </span>
-          <span style={{ color: health.proxy.errors > 0 ? TC.red : TC.textMuted, fontFamily: TC.fontMono, fontSize: 9 }}>
-            {health.proxy.errors} err
+          <span style={{ color: proxyHealth.proxy.errors > 0 ? TC.red : TC.textMuted, fontFamily: TC.fontMono, fontSize: 9 }}>
+            {proxyHealth.proxy.errors} err
           </span>
-          <span style={{ color: health.proxy.auth_configured ? TC.green : TC.red, fontFamily: TC.fontMono, fontSize: 9 }}>
-            {health.proxy.auth_configured ? '✓ auth' : '✗ auth'}
+          <span style={{ color: proxyHealth.proxy.auth_configured ? TC.green : TC.red, fontFamily: TC.fontMono, fontSize: 9 }}>
+            {proxyHealth.proxy.auth_configured ? '✓ auth' : '✗ auth'}
           </span>
+        </div>
+      )}
+      {proxyHealth?.error && (
+        <div style={{ color: TC.red, fontSize: 10, fontFamily: TC.fontMono, marginTop: 5 }}>
+          {proxyHealth.error}
+        </div>
+      )}
+
+      {/* Inference result — only shown after TEST clicked */}
+      {inference && (
+        <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${TC.border}` }}>
+          {inference.status === 'ok' && inference.test_score !== null ? (
+            <div style={{ color: TC.textMuted, fontSize: 10, fontFamily: TC.fontMono, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              score {inference.test_score > 0 ? '+' : ''}{inference.test_score.toFixed(3)} · {inference.latency_ms}ms · {inference.model}
+            </div>
+          ) : (
+            <div style={{ color: TC.red, fontSize: 10, fontFamily: TC.fontMono, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {inference.detail ?? 'Error'}
+            </div>
+          )}
         </div>
       )}
     </TCCard>

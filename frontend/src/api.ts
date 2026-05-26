@@ -80,6 +80,7 @@ export const api = {
 
   // Claude health
   getClaudeHealth: () => req<ClaudeHealth>('/health/claude'),
+  getProxyHealth:  () => req<ProxyHealth>('/health/proxy'),
 
   // Paper account
   getPaperAccount: () => req<PaperAccount>('/paper/account'),
@@ -246,6 +247,7 @@ export interface NewsArticle {
   url: string | null
   summary: string
   category: string | null
+  impact_score?: number | null
 }
 
 export interface ClaudeHealth {
@@ -255,6 +257,10 @@ export interface ClaudeHealth {
   reasoning?: string
   latency_ms: number | null
   detail?: string
+}
+
+export interface ProxyHealth {
+  mode: 'proxy' | 'direct'
   proxy?: {
     status: string
     uptime_seconds: number
@@ -262,6 +268,7 @@ export interface ClaudeHealth {
     errors: number
     auth_configured: boolean
   } | null
+  error?: string
 }
 
 export interface SocialPost {
@@ -273,6 +280,7 @@ export interface SocialPost {
   published_at: string | null
   platform: string
   category: string | null
+  impact_score?: number | null
 }
 
 export interface FeedSource {

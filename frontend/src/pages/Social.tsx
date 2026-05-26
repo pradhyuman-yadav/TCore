@@ -352,6 +352,14 @@ function PostCard({ post, source }: { post: SocialPost; source: Source }) {
             )}
           </>
         )}
+        {post.impact_score != null && (
+          <span style={{
+            color: post.impact_score > 0.6 ? TC.red : post.impact_score > 0.3 ? TC.yellow : TC.textMuted,
+            fontFamily: TC.fontMono, fontSize: 10, fontWeight: 700,
+          }}>
+            ⚡ {(post.impact_score * 100).toFixed(2)}%
+          </span>
+        )}
         <span style={{ color: TC.textMuted, fontSize: 10, fontFamily: TC.fontMono, marginLeft: 'auto' }}>
           {timeAgo(post.published_at)}
         </span>
