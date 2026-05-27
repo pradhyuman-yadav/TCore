@@ -32,7 +32,7 @@ def upgrade() -> None:
     # Partial unique index — dedup by trade ID when present
     op.execute("""
         CREATE UNIQUE INDEX IF NOT EXISTS tick_trades_dedup_idx
-        ON tick_trades (venue, symbol, agg_id)
+        ON tick_trades (ts, venue, symbol, agg_id)
         WHERE agg_id IS NOT NULL
     """)
     # Supporting index for range queries in the Hawkes fitter
