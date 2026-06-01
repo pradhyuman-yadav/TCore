@@ -207,6 +207,21 @@ async def run_trading_cycle() -> None:
             if strategy_id:
                 await snapshot_indicators(symbol, strategy_id, indicator_values, weights, db)
 
+            # 4b. Fold Hawkes order-flow pressure into the ensemble. The Hawkes
+            # refit job populates app_state.hawkes_pressure; weight comes from the
+            # strategy config (indicators.hawkes_pressure.weight or hawkes_weight).
+            from app.services.signal_ensemble import fold_microstructure
+
+            _hawkes_cfg = (strategy.get("indicators", {}) or {}).get("hawkes_pressure", {})
+            _hawkes_weight = float(
+                _hawkes_cfg.get("weight") if isinstance(_hawkes_cfg, dict) and "weight" in _hawkes_cfg
+                else strategy.get("hawkes_weight", 0.0)
+            )
+            _pressure = app_state.hawkes_pressure.get(symbol)
+            indicator_values, weights = fold_microstructure(
+                indicator_values, weights, pressure=_pressure, weight=_hawkes_weight
+            )
+
             # 5. Composite score
             composite = compute_composite_score(indicator_values, weights)
             if composite is None:
@@ -227,6 +242,20 @@ async def run_trading_cycle() -> None:
                 buy_threshold=buy_threshold,
                 sell_threshold=sell_threshold,
             )
+
+            # 5b. Regime gate — block new longs in a reflexive (self-exciting)
+            # regime or when order flow disagrees. Exits are never gated.
+            from app.services.signal_ensemble import gate_entry
+
+            _regime = app_state.hawkes_regime.get(symbol)
+            gated_zone, gate_reason = gate_entry(zone, _regime, _pressure)
+            if gated_zone != zone:
+                log.info(
+                    "trading_cycle.regime_gate",
+                    symbol=symbol, from_zone=zone, to_zone=gated_zone,
+                    regime=_regime, reason=gate_reason,
+                )
+                zone = gated_zone
 
             if strategy_id:
                 await snapshot_composite(symbol, strategy_id, composite, zone, db)
