@@ -10,6 +10,8 @@ class AppState:
     kill_switch: bool = False
     trading_mode: str = "paper"
     daily_pnl: dict[str, float] = field(default_factory=lambda: {"paper": 0.0, "live": 0.0})
+    # High-water mark of account equity per mode — feeds the drawdown circuit breaker
+    peak_equity: dict[str, float] = field(default_factory=lambda: {"paper": 0.0, "live": 0.0})
     watched_symbols: list[dict] = field(default_factory=list)
     # Hawkes OFI — updated by refit_hawkes_job; served by /hawkes/pressure
     hawkes_pressure: dict[str, float] = field(default_factory=dict)   # symbol → pressure

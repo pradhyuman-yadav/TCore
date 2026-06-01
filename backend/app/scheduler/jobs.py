@@ -71,6 +71,51 @@ async def _count_open_positions(symbol: str, exchange: str, mode: str, db) -> in
     return len(rows)
 
 
+async def _account_equity(mode: str, db) -> float:
+    """Account equity = initial capital + realised PnL (sum of closed trades)."""
+    from sqlalchemy import func
+    from app.db.models import Trade
+
+    initial = float(app_state.paper_account.get("initial_capital", 10_000.0))
+    realised = (
+        await db.execute(
+            select(func.coalesce(func.sum(Trade.pnl), 0.0)).where(
+                Trade.mode == mode, Trade.pnl.isnot(None)
+            )
+        )
+    ).scalar_one()
+    return initial + float(realised or 0.0)
+
+
+async def _total_open_notional(mode: str, db) -> float:
+    """Sum of open-position notional (quantity * entry price) across the mode."""
+    from app.db.models import Position
+
+    rows = (
+        await db.execute(
+            select(Position).where(Position.mode == mode, Position.is_open == True)
+        )
+    ).scalars().all()
+    return sum(float(p.quantity) * float(p.avg_entry_price) for p in rows)
+
+
+def _build_risk_params(strategy: dict):
+    """Build RiskParams from strategy['risk'], falling back to safe defaults."""
+    from app.services.risk_guard import RiskParams
+
+    r = strategy.get("risk", {}) if isinstance(strategy, dict) else {}
+    keys = (
+        "risk_per_trade_pct", "stop_loss_atr_mult", "take_profit_atr_mult",
+        "stop_loss_pct_fallback", "max_position_pct", "max_total_exposure_pct",
+        "max_drawdown_pct", "min_position_usdt",
+    )
+    kwargs = {k: float(r[k]) for k in keys if k in r}
+    try:
+        return RiskParams(**kwargs)
+    except (ValueError, TypeError):
+        return RiskParams()
+
+
 _SHORT_TO_FULL = {
     "macd":    "macd_hist",
     "bb":      "bb_position",
@@ -196,6 +241,63 @@ async def run_trading_cycle() -> None:
                 daily_pnl=app_state.daily_pnl.get(mode, 0.0),
                 strategy_config=strategy,
             )
+
+            # 6a. Risk guard — hard capital-safety layer. Sizes the position by
+            # volatility, enforces stop-loss/take-profit, exposure caps, and a
+            # drawdown circuit breaker. The guard OVERRIDES the rule signal.
+            # Wrapped defensively: any failure falls back to the raw signal so a
+            # context-building error can never silently halt trading.
+            try:
+                from app.services.risk_guard import (
+                    PositionState, RiskContext, apply_risk_guard, compute_atr,
+                )
+                from app.services.paper_broker import _get_open_position
+
+                equity = await _account_equity(mode, db)
+                peak = max(app_state.peak_equity.get(mode, 0.0), equity)
+                app_state.peak_equity[mode] = peak
+
+                atr = compute_atr(
+                    ohlcv_df["high"].tolist(),
+                    ohlcv_df["low"].tolist(),
+                    ohlcv_df["close"].tolist(),
+                )
+                price = float(ohlcv_df["close"].iloc[-1])
+                open_pos = await _get_open_position(symbol, exchange, mode, db)
+                pos_state = (
+                    PositionState(
+                        entry_price=float(open_pos.avg_entry_price),
+                        quantity=float(open_pos.quantity),
+                    )
+                    if open_pos is not None
+                    else None
+                )
+                ctx = RiskContext(
+                    price=price,
+                    equity=equity,
+                    peak_equity=peak,
+                    atr=atr,
+                    open_position=pos_state,
+                    total_open_notional=await _total_open_notional(mode, db),
+                )
+                decision = apply_risk_guard(signal, ctx, _build_risk_params(strategy))
+                from app.services.rule_engine import TradeSignal as _TS
+                signal = _TS(
+                    action=decision.action,
+                    quantity_usdt=decision.quantity_usdt,
+                    reason=decision.reason,
+                )
+                log.info(
+                    "trading_cycle.risk_guard",
+                    symbol=symbol,
+                    action=decision.action,
+                    qty_usdt=round(decision.quantity_usdt, 2),
+                    stop_loss=decision.stop_loss,
+                    take_profit=decision.take_profit,
+                    vetoed=decision.vetoed,
+                )
+            except Exception as exc:
+                log.warning("trading_cycle.risk_guard_error", symbol=symbol, error=str(exc))
 
             log.info(
                 "trading_cycle.signal",
