@@ -271,6 +271,58 @@ async def run_trading_cycle() -> None:
                 strategy_config=strategy,
             )
 
+            # 6-agent. Optional Claude agent decision mode. When the strategy sets
+            # decision_mode="agent", the agent's proposal REPLACES the rule signal's
+            # direction. On any failure we keep the rule signal (graceful fallback).
+            # The agent never sizes the order — the risk guard below does; the
+            # agent's size_fraction can only SHRINK the guard-sized notional.
+            _agent_size_fraction = 1.0
+            if str(strategy.get("decision_mode", "rules")).lower() == "agent" \
+                    and not app_state.kill_switch:
+                try:
+                    from app.services.trader_agent import propose_trade
+                    from app.services.paper_broker import _get_open_position as _gop
+
+                    _ap = app_state.paper_account
+                    _eq = float(_ap.get("initial_capital", 10_000.0)) + \
+                        app_state.daily_pnl.get(mode, 0.0)
+                    _op = await _gop(symbol, exchange, mode, db)
+                    snapshot = {
+                        "symbol": symbol,
+                        "price": float(ohlcv_df["close"].iloc[-1]),
+                        "composite_score": round(composite, 4),
+                        "zone": zone,
+                        "indicators": {k: v for k, v in indicator_values.items() if v is not None},
+                        "hawkes_pressure": app_state.hawkes_pressure.get(symbol),
+                        "hawkes_regime": app_state.hawkes_regime.get(symbol),
+                        "news_sentiment": indicator_values.get("news_sentiment"),
+                        "open_position": (
+                            {"entry": float(_op.avg_entry_price), "qty": float(_op.quantity)}
+                            if _op is not None else None
+                        ),
+                        "equity": round(_eq, 2),
+                        "daily_pnl": round(app_state.daily_pnl.get(mode, 0.0), 2),
+                    }
+                    proposal = await propose_trade(snapshot)
+                    if proposal is not None:
+                        from app.services.rule_engine import TradeSignal as _TSig
+                        signal = _TSig(
+                            action=proposal.action,
+                            quantity_usdt=0.0,
+                            reason=f"agent({proposal.confidence:.2f}): {proposal.reason}",
+                        )
+                        _agent_size_fraction = proposal.size_fraction
+                        log.info(
+                            "trading_cycle.agent",
+                            symbol=symbol, action=proposal.action,
+                            confidence=round(proposal.confidence, 3),
+                            size_fraction=round(proposal.size_fraction, 3),
+                        )
+                    else:
+                        log.info("trading_cycle.agent_fallback_to_rules", symbol=symbol)
+                except Exception as exc:
+                    log.warning("trading_cycle.agent_error", symbol=symbol, error=str(exc))
+
             # 6a. Risk guard — hard capital-safety layer. Sizes the position by
             # volatility, enforces stop-loss/take-profit, exposure caps, and a
             # drawdown circuit breaker. The guard OVERRIDES the rule signal.
@@ -309,11 +361,22 @@ async def run_trading_cycle() -> None:
                     open_position=pos_state,
                     total_open_notional=await _total_open_notional(mode, db),
                 )
-                decision = apply_risk_guard(signal, ctx, _build_risk_params(strategy))
+                _rp = _build_risk_params(strategy)
+                decision = apply_risk_guard(signal, ctx, _rp)
+                # Agent conviction can only SHRINK the guard-sized notional, never
+                # grow it past a hard limit. If shrinking drops it below the
+                # minimum, hold instead.
+                _qty = decision.quantity_usdt
+                if decision.action == "buy" and _agent_size_fraction < 1.0:
+                    _qty = decision.quantity_usdt * _agent_size_fraction
+                    if _qty < _rp.min_position_usdt:
+                        decision.action = "hold"
+                        _qty = 0.0
+                        decision.reason += f" | agent-shrunk below min ({_rp.min_position_usdt})"
                 from app.services.rule_engine import TradeSignal as _TS
                 signal = _TS(
                     action=decision.action,
-                    quantity_usdt=decision.quantity_usdt,
+                    quantity_usdt=_qty,
                     reason=decision.reason,
                 )
                 log.info(
