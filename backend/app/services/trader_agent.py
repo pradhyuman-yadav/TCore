@@ -88,11 +88,13 @@ def build_agent_prompt(snapshot: dict) -> str:
         f"- news_sentiment (-1..1): {snapshot.get('news_sentiment')}\n"
         f"- open_position: {pos_txt}\n"
         f"- equity_usdt: {snapshot.get('equity')}\n"
-        f"- daily_pnl_usdt: {snapshot.get('daily_pnl')}\n\n"
+        f"- daily_pnl_usdt: {snapshot.get('daily_pnl')}\n"
+        f"- past_performance: {snapshot.get('performance', 'no prior performance data')}\n\n"
         "Guidance: avoid opening new longs in a reflexive (self-exciting) regime; "
         "prefer entries confirmed by positive order-flow pressure; respect that a "
         "negative daily PnL means tighten up. If a position is open and the thesis "
-        "has weakened, prefer to exit (sell).\n\n"
+        "has weakened, prefer to exit (sell). If past_performance shows this regime "
+        "has been unprofitable, lower conviction or hold.\n\n"
         "Return ONLY a JSON object, no prose:\n"
         '{"action": "buy|sell|hold", "size_fraction": <0.0-1.0>, '
         '"confidence": <0.0-1.0>, "reason": "<one sentence>"}'

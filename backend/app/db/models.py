@@ -251,6 +251,34 @@ class TickTrade(Base):
     agg_id: Mapped[int | None] = mapped_column(BigInteger)           # trade ID for dedup
 
 
+class TradeJournal(Base):
+    """
+    Closed-trade outcome with the decision context it was made under.
+    Feeds the performance feedback loop (per-regime / per-mode expectancy).
+    """
+    __tablename__ = "trade_journal"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    closed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default="NOW()"
+    )
+    symbol: Mapped[str] = mapped_column(Text, nullable=False)
+    exchange: Mapped[str] = mapped_column(Text, nullable=False)
+    mode: Mapped[str] = mapped_column(Text, nullable=False)           # paper | live
+    decision_mode: Mapped[str | None] = mapped_column(Text)           # rules | agent
+    regime: Mapped[str | None] = mapped_column(Text)                  # stable | reflexive
+    pressure: Mapped[float | None] = mapped_column(Double)            # Hawkes pressure at exit
+    confidence: Mapped[float | None] = mapped_column(Double)          # agent confidence
+    entry_price: Mapped[float | None] = mapped_column(Double)
+    exit_price: Mapped[float | None] = mapped_column(Double)
+    pnl: Mapped[float | None] = mapped_column(Double)
+    stop_loss: Mapped[float | None] = mapped_column(Double)
+    take_profit: Mapped[float | None] = mapped_column(Double)
+    strategy_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+
+
 class HawkesParams(Base):
     """Fitted Hawkes model parameters — cached after each refit job."""
     __tablename__ = "hawkes_params"

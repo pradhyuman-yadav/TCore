@@ -277,11 +277,15 @@ async def run_trading_cycle() -> None:
             # The agent never sizes the order — the risk guard below does; the
             # agent's size_fraction can only SHRINK the guard-sized notional.
             _agent_size_fraction = 1.0
-            if str(strategy.get("decision_mode", "rules")).lower() == "agent" \
-                    and not app_state.kill_switch:
+            _agent_confidence = None
+            _stop_loss = None
+            _take_profit = None
+            _decision_mode = str(strategy.get("decision_mode", "rules")).lower()
+            if _decision_mode == "agent" and not app_state.kill_switch:
                 try:
                     from app.services.trader_agent import propose_trade
                     from app.services.paper_broker import _get_open_position as _gop
+                    from app.services.feedback import format_feedback_for_prompt as _fmt_feedback
 
                     _ap = app_state.paper_account
                     _eq = float(_ap.get("initial_capital", 10_000.0)) + \
@@ -302,6 +306,10 @@ async def run_trading_cycle() -> None:
                         ),
                         "equity": round(_eq, 2),
                         "daily_pnl": round(app_state.daily_pnl.get(mode, 0.0), 2),
+                        "performance": _fmt_feedback(
+                            app_state.performance_feedback, mode,
+                            app_state.hawkes_regime.get(symbol),
+                        ),
                     }
                     proposal = await propose_trade(snapshot)
                     if proposal is not None:
@@ -312,6 +320,7 @@ async def run_trading_cycle() -> None:
                             reason=f"agent({proposal.confidence:.2f}): {proposal.reason}",
                         )
                         _agent_size_fraction = proposal.size_fraction
+                        _agent_confidence = proposal.confidence
                         log.info(
                             "trading_cycle.agent",
                             symbol=symbol, action=proposal.action,
@@ -373,6 +382,8 @@ async def run_trading_cycle() -> None:
                         decision.action = "hold"
                         _qty = 0.0
                         decision.reason += f" | agent-shrunk below min ({_rp.min_position_usdt})"
+                _stop_loss = decision.stop_loss
+                _take_profit = decision.take_profit
                 from app.services.rule_engine import TradeSignal as _TS
                 signal = _TS(
                     action=decision.action,
@@ -414,7 +425,29 @@ async def run_trading_cycle() -> None:
 
             # 7. Execute
             if strategy_id:
-                await execute_signal(signal, symbol, exchange, strategy_id, composite, db)
+                trade = await execute_signal(signal, symbol, exchange, strategy_id, composite, db)
+
+                # 7b. Journal closed trades with the decision context they were
+                # made under — feeds the performance feedback loop. Defensive: a
+                # journaling error must never break the trade itself.
+                if trade is not None and trade.side == "sell" and trade.pnl is not None:
+                    try:
+                        from app.db.models import TradeJournal
+                        db.add(TradeJournal(
+                            symbol=symbol, exchange=exchange, mode=mode,
+                            decision_mode=_decision_mode,
+                            regime=_regime,
+                            pressure=_pressure,
+                            confidence=_agent_confidence,
+                            exit_price=float(trade.price),
+                            pnl=float(trade.pnl),
+                            stop_loss=_stop_loss,
+                            take_profit=_take_profit,
+                            strategy_id=strategy_id,
+                        ))
+                        await db.commit()
+                    except Exception as exc:
+                        log.warning("trading_cycle.journal_error", symbol=symbol, error=str(exc))
 
     except Exception as exc:
         log.error("trading_cycle.error", error=str(exc))
@@ -618,6 +651,42 @@ async def cleanup_tick_trades_job() -> None:
         log.error("tick_trades.cleanup_error", error=str(exc))
 
 
+async def compute_performance_feedback_job() -> None:
+    """
+    Periodic job: aggregate recent closed-trade outcomes from trade_journal into
+    per-mode / per-regime expectancy and store it in app_state. The trader agent
+    reads this summary as prompt context, closing the learning loop.
+    """
+    from datetime import timedelta
+    from sqlalchemy import select
+    from app.db.models import TradeJournal
+    from app.services.feedback import JournalRecord, aggregate_performance
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+    try:
+        async with AsyncSessionLocal() as db:
+            rows = (
+                await db.execute(
+                    select(TradeJournal).where(
+                        TradeJournal.closed_at >= cutoff,
+                        TradeJournal.pnl.isnot(None),
+                    )
+                )
+            ).scalars().all()
+        records = [
+            JournalRecord(
+                mode=r.mode, pnl=float(r.pnl), regime=r.regime,
+                decision_mode=r.decision_mode or "rules", confidence=r.confidence,
+            )
+            for r in rows
+        ]
+        app_state.performance_feedback = aggregate_performance(records)
+        log.info("feedback.computed", records=len(records),
+                 modes=list(app_state.performance_feedback.keys()))
+    except Exception as exc:
+        log.error("feedback.compute_error", error=str(exc))
+
+
 def setup_scheduler(scheduler: AsyncIOScheduler) -> None:
     import os
     _in_test = bool(os.getenv("PYTEST_CURRENT_TEST"))
@@ -692,6 +761,16 @@ def setup_scheduler(scheduler: AsyncIOScheduler) -> None:
         minute=0,
         id="tick_trades_cleanup",
         replace_existing=True,
+        misfire_grace_time=300,
+    )
+
+    scheduler.add_job(
+        compute_performance_feedback_job,
+        trigger="interval",
+        minutes=60,
+        id="performance_feedback",
+        replace_existing=True,
+        next_run_time=None if _in_test else datetime.now(timezone.utc),
         misfire_grace_time=300,
     )
 

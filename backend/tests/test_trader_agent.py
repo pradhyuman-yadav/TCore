@@ -63,6 +63,16 @@ class TestBuildPrompt:
         p = build_agent_prompt(_snapshot())
         assert "Return ONLY a JSON object" in p
 
+    def test_includes_past_performance(self):
+        p = build_agent_prompt(_snapshot(performance="overall 10 trades, win 60%"))
+        assert "past_performance" in p and "win 60%" in p
+
+    def test_past_performance_defaults_when_absent(self):
+        snap = _snapshot()
+        snap.pop("performance", None)
+        p = build_agent_prompt(snap)
+        assert "no prior performance data" in p
+
 
 # ── parse_agent_response ──────────────────────────────────────────────────────
 class TestParseResponse:

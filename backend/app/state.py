@@ -12,6 +12,9 @@ class AppState:
     daily_pnl: dict[str, float] = field(default_factory=lambda: {"paper": 0.0, "live": 0.0})
     # High-water mark of account equity per mode — feeds the drawdown circuit breaker
     peak_equity: dict[str, float] = field(default_factory=lambda: {"paper": 0.0, "live": 0.0})
+    # Aggregated trade-journal performance — mode → {regime → stats}. Refreshed by
+    # the feedback job; read into the trader agent prompt so it learns from outcomes.
+    performance_feedback: dict = field(default_factory=dict)
     watched_symbols: list[dict] = field(default_factory=list)
     # Hawkes OFI — updated by refit_hawkes_job; served by /hawkes/pressure
     hawkes_pressure: dict[str, float] = field(default_factory=dict)   # symbol → pressure
