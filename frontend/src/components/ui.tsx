@@ -405,6 +405,7 @@ const NAV_ITEMS = [
   { id: '/signals',  label: 'Signal Monitor',    Icon: TCIcons.Signals   },
   { id: '/news',     label: 'News',              Icon: TCIcons.News      },
   { id: '/social',   label: 'Social',            Icon: TCIcons.Social    },
+  { id: '/activity', label: 'Activity Log',      Icon: TCIcons.Signals   },
 ]
 
 interface SidebarProps {

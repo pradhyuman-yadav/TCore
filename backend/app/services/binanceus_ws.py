@@ -244,8 +244,32 @@ class BinanceUSStreamClient:
                 )
                 await db.execute(stmt)
                 await db.commit()
+            await self._maybe_log_tick_flush(len(ticks))
         except Exception as exc:
             log.warning("binanceus_ws.tick_flush_error", error=str(exc), count=len(ticks))
+
+    async def _maybe_log_tick_flush(self, n: int) -> None:
+        """Emit an aggregated tick-ingestion event at most once per minute."""
+        import time
+
+        self._ticks_persisted = getattr(self, "_ticks_persisted", 0) + n
+        now = time.monotonic()
+        if not hasattr(self, "_last_tick_log"):
+            # Seed on first flush so we don't emit immediately (and don't perturb
+            # the single-flush path that tests assert on).
+            self._last_tick_log = now
+            return
+        if now - self._last_tick_log < 60.0:
+            return
+        total = self._ticks_persisted
+        self._ticks_persisted = 0
+        self._last_tick_log = now
+        try:
+            from app.services.event_log import log_event
+            await log_event("data", f"tick ingestion: {total} ticks persisted (last 60s)",
+                            payload={"ticks": total})
+        except Exception:
+            pass
 
 
 # Module-level singleton

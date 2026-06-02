@@ -6,7 +6,7 @@ from app.ws.manager import ws_manager
 
 router = APIRouter()
 
-VALID_CHANNELS = {"signals", "trades", "portfolio", "prices", "live_trades"}
+VALID_CHANNELS = {"signals", "trades", "portfolio", "prices", "live_trades", "events"}
 
 _PING_INTERVAL = 25  # seconds — below typical LB idle-timeout of 60s
 

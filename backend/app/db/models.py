@@ -251,6 +251,23 @@ class TickTrade(Base):
     agg_id: Mapped[int | None] = mapped_column(BigInteger)           # trade ID for dedup
 
 
+class EventLog(Base):
+    """
+    Append-only audit trail of every system event — decisions, actions, jobs,
+    data ingestion, control changes, errors. Backs the Activity tab. Promoted to
+    a TimescaleDB hypertable (high volume) with short retention.
+    """
+    __tablename__ = "event_log"
+
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    category: Mapped[str] = mapped_column(Text, nullable=False)   # decision|trade|risk|agent|regime|control|job|data|error
+    level: Mapped[str] = mapped_column(Text, nullable=False, server_default="'info'")  # info|warn|error
+    symbol: Mapped[str | None] = mapped_column(Text)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    payload: Mapped[Any | None] = mapped_column(JSONB)
+
+
 class TradeJournal(Base):
     """
     Closed-trade outcome with the decision context it was made under.

@@ -12,6 +12,7 @@ import Backtest from './pages/Backtest'
 import SignalMonitor from './pages/SignalMonitor'
 import News from './pages/News'
 import Social from './pages/Social'
+import Activity from './pages/Activity'
 
 function AppShell() {
   const { killSwitch, tradingMode, wsStatus, setKillSwitch, setTradingMode, setActiveStrategy, activeStrategy, workspace, setWorkspace } = useStore()
@@ -22,6 +23,8 @@ function AppShell() {
 
   // Keep signals WS connected at all times so Navbar WS indicator stays accurate
   useWebSocket('signals')
+  // Keep the events WS connected app-wide so the Activity feed never misses events
+  useWebSocket('events')
 
   useEffect(() => {
     api.getControl().then(({ kill_switch, trading_mode }) => {
@@ -92,6 +95,7 @@ function AppShell() {
             <Route path="/signals"  element={<SignalMonitor/>}/>
             <Route path="/news"    element={<News/>}/>
             <Route path="/social"  element={<Social/>}/>
+            <Route path="/activity" element={<Activity/>}/>
           </Routes>
         </main>
       </div>

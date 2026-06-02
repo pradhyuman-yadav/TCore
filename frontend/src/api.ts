@@ -139,6 +139,17 @@ export const api = {
   },
   refreshSocial: () => req<{ status: string }>('/social/refresh', { method: 'POST' }),
 
+  // Event log (system activity audit trail)
+  getEvents: (params?: { limit?: number; category?: string; level?: string; symbol?: string; since?: string }) => {
+    const p = new URLSearchParams({ limit: String(params?.limit ?? 200) })
+    if (params?.category) p.set('category', params.category)
+    if (params?.level) p.set('level', params.level)
+    if (params?.symbol) p.set('symbol', params.symbol)
+    if (params?.since) p.set('since', params.since)
+    return req<EventRow[]>(`/events?${p}`)
+  },
+  getEventCategories: () => req<{ categories: string[]; levels: string[] }>('/events/categories'),
+
   // Hawkes OFI (crypto only)
   getHawkesPressure: (symbol: string, venue = 'binanceus') =>
     req<HawkesPressureResponse>(
@@ -353,6 +364,16 @@ export interface HawkesForecastResponse {
   p50:                number
   p90:                number
   prob_buy_pressure:  number
+}
+
+export interface EventRow {
+  ts: string
+  id?: string
+  category: string   // decision|trade|risk|agent|regime|control|job|data|error
+  level: string      // info|warn|error
+  symbol: string | null
+  message: string
+  payload?: Record<string, unknown>
 }
 
 export interface StoredSignal {

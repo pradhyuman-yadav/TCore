@@ -13,6 +13,7 @@ from app.services.execution import execute_signal
 from app.services.indicator_engine import compute_indicators, snapshot_indicators
 from app.services.rule_engine import evaluate_rules
 from app.services.sentiment_agent import score_sentiment
+from app.services.event_log import log_event
 from app.state import app_state
 
 log = structlog.get_logger()
@@ -255,6 +256,10 @@ async def run_trading_cycle() -> None:
                     symbol=symbol, from_zone=zone, to_zone=gated_zone,
                     regime=_regime, reason=gate_reason,
                 )
+                await log_event(
+                    "regime", f"{symbol}: {gate_reason}", symbol=symbol,
+                    payload={"from_zone": zone, "to_zone": gated_zone, "regime": _regime},
+                )
                 zone = gated_zone
 
             if strategy_id:
@@ -326,6 +331,17 @@ async def run_trading_cycle() -> None:
                             symbol=symbol, action=proposal.action,
                             confidence=round(proposal.confidence, 3),
                             size_fraction=round(proposal.size_fraction, 3),
+                        )
+                        await log_event(
+                            "agent",
+                            f"{symbol}: agent says {proposal.action} "
+                            f"(conf {proposal.confidence:.0%}) — {proposal.reason}",
+                            symbol=symbol,
+                            payload={
+                                "action": proposal.action,
+                                "confidence": round(proposal.confidence, 3),
+                                "size_fraction": round(proposal.size_fraction, 3),
+                            },
                         )
                     else:
                         log.info("trading_cycle.agent_fallback_to_rules", symbol=symbol)
@@ -399,6 +415,14 @@ async def run_trading_cycle() -> None:
                     take_profit=decision.take_profit,
                     vetoed=decision.vetoed,
                 )
+                if decision.vetoed:
+                    await log_event(
+                        "risk", f"{symbol}: risk guard — {decision.reason}",
+                        level="warn", symbol=symbol,
+                        payload={"action": decision.action,
+                                 "stop_loss": decision.stop_loss,
+                                 "take_profit": decision.take_profit},
+                    )
             except Exception as exc:
                 log.warning("trading_cycle.risk_guard_error", symbol=symbol, error=str(exc))
 
@@ -423,9 +447,32 @@ async def run_trading_cycle() -> None:
             ))
             await db.commit()
 
+            # 6c. Audit the final decision for this cycle.
+            await log_event(
+                "decision",
+                f"{symbol}: {signal.action.upper()} (zone {zone}, score {composite:+.3f})",
+                symbol=symbol,
+                payload={"action": signal.action, "zone": zone,
+                         "score": round(composite, 4),
+                         "quantity_usdt": round(signal.quantity_usdt, 2),
+                         "decision_mode": _decision_mode},
+            )
+
             # 7. Execute
             if strategy_id:
                 trade = await execute_signal(signal, symbol, exchange, strategy_id, composite, db)
+                if trade is not None:
+                    await log_event(
+                        "trade",
+                        f"{symbol}: filled {trade.side.upper()} {float(trade.quantity):.6g} "
+                        f"@ {float(trade.price):.4f}"
+                        + (f" | PnL {float(trade.pnl):+.2f}" if trade.pnl is not None else ""),
+                        symbol=symbol,
+                        payload={"side": trade.side, "price": float(trade.price),
+                                 "quantity": float(trade.quantity),
+                                 "pnl": (float(trade.pnl) if trade.pnl is not None else None),
+                                 "mode": mode},
+                    )
 
                 # 7b. Journal closed trades with the decision context they were
                 # made under — feeds the performance feedback loop. Defensive: a
@@ -537,8 +584,11 @@ async def refresh_news_job() -> None:
                 await db.execute(stmt)
             await db.commit()
         log.info("news.refreshed", count=len(items))
+        await log_event("data", f"news refresh: {len(items)} items",
+                        payload={"count": len(items)})
     except Exception as exc:
         log.error("news.refresh_error", error=str(exc))
+        await log_event("error", f"news refresh failed: {exc}", level="error")
 
 
 async def refresh_social_job() -> None:
@@ -607,8 +657,10 @@ async def refresh_social_job() -> None:
 
             await db.commit()
         log.info("social.refreshed")
+        await log_event("data", "social refresh complete")
     except Exception as exc:
         log.error("social.refresh_error", error=str(exc))
+        await log_event("error", f"social refresh failed: {exc}", level="error")
 
 
 async def refit_hawkes_job() -> None:
@@ -631,6 +683,14 @@ async def refit_hawkes_job() -> None:
                          symbol=symbol,
                          branching=round(params.branching, 4),
                          regime=params.regime)
+                await log_event(
+                    "regime",
+                    f"{symbol}: Hawkes refit — regime {params.regime} "
+                    f"(branching {params.branching:.3f})",
+                    symbol=symbol,
+                    payload={"regime": params.regime,
+                             "branching": round(params.branching, 4)},
+                )
         except Exception as exc:
             log.error("hawkes.refit_error", symbol=symbol, error=str(exc))
 
@@ -683,6 +743,11 @@ async def compute_performance_feedback_job() -> None:
         app_state.performance_feedback = aggregate_performance(records)
         log.info("feedback.computed", records=len(records),
                  modes=list(app_state.performance_feedback.keys()))
+        await log_event(
+            "job", f"performance feedback recomputed from {len(records)} trades",
+            payload={"records": len(records),
+                     "modes": list(app_state.performance_feedback.keys())},
+        )
     except Exception as exc:
         log.error("feedback.compute_error", error=str(exc))
 

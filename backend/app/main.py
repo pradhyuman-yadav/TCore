@@ -9,7 +9,7 @@ from sqlalchemy import select, text
 from app.config import settings
 from app.db.models import Controls, Strategy
 from app.db.session import AsyncSessionLocal, engine
-from app.routers import backtest, control, hawkes, health, impact, live, market, news, paper, signals, social, sources, strategy, watchlist, ws
+from app.routers import backtest, control, events, hawkes, health, impact, live, market, news, paper, signals, social, sources, strategy, watchlist, ws
 from app.scheduler.jobs import setup_scheduler
 from app.state import app_state
 from app.ws.manager import ws_manager
@@ -107,3 +107,4 @@ app.include_router(social.router)
 app.include_router(sources.router)
 app.include_router(impact.router)
 app.include_router(hawkes.router)
+app.include_router(events.router)

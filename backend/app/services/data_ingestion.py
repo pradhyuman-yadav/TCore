@@ -122,6 +122,19 @@ async def upsert_ohlcv(rows: list[OHLCVRow], db: AsyncSession) -> int:
     )
     await db.execute(stmt)
     await db.commit()
+
+    try:
+        from app.services.event_log import log_event
+        await log_event(
+            "data",
+            f"OHLCV upsert: {len(rows)} {rows[0].timeframe} bars for {rows[0].symbol}",
+            symbol=rows[0].symbol,
+            payload={"count": len(rows), "timeframe": rows[0].timeframe,
+                     "exchange": rows[0].exchange},
+        )
+    except Exception:
+        pass
+
     return len(rows)
 
 

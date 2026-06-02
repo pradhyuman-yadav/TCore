@@ -9,6 +9,15 @@ interface Signal {
   reason?: string
 }
 
+export interface SysEvent {
+  ts: string
+  category: string
+  level: string
+  symbol: string | null
+  message: string
+  payload?: Record<string, unknown>
+}
+
 export interface PriceTick {
   type: 'tick'
   symbol: string
@@ -29,6 +38,7 @@ interface AppStore {
   wsStatus: 'connecting' | 'open' | 'closed'
   latestTick: PriceTick | null
   workspace: 'crypto' | 'stock'
+  events: SysEvent[]
 
   setKillSwitch: (v: boolean) => void
   setTradingMode: (v: string) => void
@@ -38,6 +48,8 @@ interface AppStore {
   setWsStatus: (s: AppStore['wsStatus']) => void
   setLatestTick: (t: PriceTick) => void
   setWorkspace: (w: 'crypto' | 'stock') => void
+  pushEvent: (e: SysEvent) => void
+  setEvents: (e: SysEvent[]) => void
 }
 
 export const useStore = create<AppStore>((set) => ({
@@ -48,6 +60,7 @@ export const useStore = create<AppStore>((set) => ({
   wsStatus: 'closed',
   latestTick: null,
   workspace: 'crypto',
+  events: [],
 
   setKillSwitch: (v) => set({ killSwitch: v }),
   setTradingMode: (v) => set({ tradingMode: v }),
@@ -62,4 +75,7 @@ export const useStore = create<AppStore>((set) => ({
   setWsStatus: (s) => set({ wsStatus: s }),
   setLatestTick: (t) => set({ latestTick: t }),
   setWorkspace: (w) => set({ workspace: w }),
+  pushEvent: (e) =>
+    set((state) => ({ events: [e, ...state.events].slice(0, 1000) })),
+  setEvents: (e) => set({ events: e }),
 }))

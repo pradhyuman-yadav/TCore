@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useStore, PriceTick } from '../store'
 
 export function useWebSocket(channel: string) {
-  const { pushSignal, setWsStatus, setLatestTick } = useStore()
+  const { pushSignal, setWsStatus, setLatestTick, pushEvent } = useStore()
   const wsRef = useRef<WebSocket | null>(null)
 
   useEffect(() => {
@@ -25,6 +25,7 @@ export function useWebSocket(channel: string) {
           const data = JSON.parse(e.data)
           if (channel === 'signals') pushSignal(data)
           if (channel === 'prices' && data.type === 'tick') setLatestTick(data as PriceTick)
+          if (channel === 'events' && data.type === 'event') pushEvent(data)
         } catch { /* ignore */ }
       }
 
